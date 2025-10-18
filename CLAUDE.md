@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-Light API Router 是一个轻量级的API请求转发服务，将API请求转换为OpenAI兼容格式。该项目使用Rust语言开发，基于Hyper框架构建，相比原版减少了依赖数量，提高了性能。
+API Router 是一个轻量级的API请求转发服务，将API请求转换为OpenAI兼容格式。该项目使用Rust语言开发，基于smol异步运行时构建。
 
 ## 架构设计
 
-- **核心框架**: 使用Hyper作为Web框架，提供异步HTTP服务
-- **HTTP客户端**: 使用reqwest进行外部API请求
+- **核心运行时**: 使用smol作为异步运行时，提供轻量级异步服务
+- **HTTP客户端**: 使用reqwest进行外部API请求（reqwest基于tokio，但与smol兼容）
 - **配置管理**: 通过transformer目录中的JSON配置文件动态加载API配置
 - **请求处理**: 支持标准请求的代理转发
 

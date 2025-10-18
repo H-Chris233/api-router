@@ -1,11 +1,13 @@
 [package]
 name = "api-router"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "net"] }
+smol = "2"
+async-channel = "2"
+futures-lite = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "stream"], default-features = false }
 bytes = "1.0"
+url = "2.0"
