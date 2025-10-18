@@ -10,6 +10,7 @@
 - 支持模型名称映射
 - 支持对话上下文传递
 - CORS支持
+- **动态配置加载**：从transformer目录的JSON文件中动态加载API配置
 
 ## 安装与运行
 
@@ -28,8 +29,8 @@ cd api-router
 cargo build --release
 
 # 设置环境变量
-export TARGET_API_BASE="https://portal.qwen.ai"
 export DEFAULT_API_KEY="your-api-key-here"
+export API_CONFIG_FILE="qwen.json"  # 指定要使用的配置文件
 
 # 运行服务
 cargo run
@@ -37,9 +38,72 @@ cargo run
 
 ### 环境变量
 
-- `TARGET_API_BASE`：目标API的基础URL（默认：https://portal.qwen.ai）
 - `DEFAULT_API_KEY`：默认API密钥（默认：预设的示例密钥）
-- `USER_AGENT`：User-Agent字符串（默认：QwenCode/0.0.14 (linux; x64)）
+- `API_CONFIG_FILE`：要使用的配置文件名（默认：qwen.json），配置文件位于transformer目录下
+
+## 配置文件
+
+API Router 现在支持从transformer目录中的JSON文件动态加载配置，支持：
+- API基本URL设置
+- 请求头配置
+- 端点特殊选项配置
+- 模型名称映射
+- 请求/响应转换规则
+
+### 配置文件格式
+
+```json
+{
+  "name": "qwen",
+  "baseUrl": "https://portal.qwen.ai",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "QwenCode/0.0.14 (linux; x64)",
+    "Accept": "application/json"
+  },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true,
+      "streamHeaders": {
+        "Accept": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+      }
+    }
+  },
+  "modelMapping": {
+    "gpt-3.5-turbo": "qwen3-coder-plus",
+    "gpt-4": "qwen3-coder-max"
+  },
+  "requestTransforms": {
+    "renameFields": {
+      "max_tokens": "max_completion_tokens"
+    },
+    "defaultValues": {
+      "temperature": 0.7
+    }
+  },
+  "responseOptions": {
+    "forwardedHeaders": ["x-request-id", "x-ratelimit-remaining"]
+  }
+}
+```
+
+## API 端点
+
+### 聊天完成
+- `POST /v1/chat/completions` - 转发聊天完成请求
+
+### 模型列表
+- `GET /v1/models` - 获取可用模型列表
+
+### 健康检查
+- `GET /health` - 检查服务状态
 
 ## API 端点
 

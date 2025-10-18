@@ -9,10 +9,47 @@ use futures::stream::StreamExt;
 use reqwest::header;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+// API 配置结构体
+#[derive(Debug, Deserialize, Clone)]
+struct ApiConfig {
+    name: String,
+    base_url: String,
+    headers: HashMap<String, String>,
+    endpoints: HashMap<String, EndpointConfig>,
+    model_mapping: HashMap<String, String>,
+    request_transforms: TransformConfig,
+    response_options: ResponseOptions,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct EndpointConfig {
+    method: String,
+    headers: HashMap<String, String>,
+    #[serde(default = "default_stream_support")]
+    stream_support: bool,
+    #[serde(default)]
+    stream_headers: HashMap<String, String>,
+}
+
+fn default_stream_support() -> bool {
+    false
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct TransformConfig {
+    rename_fields: HashMap<String, String>,
+    default_values: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ResponseOptions {
+    forwarded_headers: Vec<String>,
+}
 
 // 定义OpenAI兼容的请求和响应结构
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -94,18 +131,27 @@ async fn main() {
     let default_api_key = std::env::var("DEFAULT_API_KEY")
         .unwrap_or_else(|_| "j88R1cKdHY1EcYk9hO5vJIrV3f4rrtI5I9NuFyyTiFLDCXRhY8ooddL72AT1NqyHKMf3iGvib2W9XBYV8duUtw".to_string());
     
+    // 从环境变量获取配置文件名，默认为qwen
+    let config_file = std::env::var("API_CONFIG_FILE")
+        .unwrap_or_else(|_| "qwen.json".to_string());
+    
+    // 读取配置文件
+    let config_path = format!("./transformer/{}", config_file);
+    let config_content = fs::read_to_string(&config_path)
+        .expect(&format!("无法读取配置文件: {}", config_path));
+    
+    let api_config: ApiConfig = serde_json::from_str(&config_content)
+        .expect(&format!("无法解析配置文件: {}", config_path));
+    
     // 创建HTTP客户端
     let client = reqwest::Client::builder()
         .build()
         .expect("Failed to create HTTP client");
 
-    // 创建API配置
-    let api_config = ApiConfig::new();
-
     // 创建应用状态
     let app_state = AppState {
         client,
-        api_config: api_config.clone(), // 保存一份用于日志记录
+        api_config,
         default_api_key,
     };
 
@@ -130,8 +176,9 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     tracing::info!("API Router 启动在 http://{}", addr);
     tracing::info!("目标API基础URL: {}", app_state.api_config.base_url);
+    tracing::info!("使用配置文件: {}", config_file);
     
-        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -150,8 +197,27 @@ async fn proxy_models(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let target_url = format!("{}/v1/models", state.api_config.base_url);
     
+    // 获取端点配置，如果没有找到则使用默认配置
+    let default_config = EndpointConfig {
+        method: "GET".to_string(),
+        headers: HashMap::new(),
+        stream_support: false,
+        stream_headers: HashMap::new(),
+    };
+    let endpoint_config = state.api_config.endpoints.get("/v1/models").unwrap_or(&default_config);
+    
     // 构建目标请求
     let mut builder = state.client.get(&target_url);
+    
+    // 添加全局配置头
+    for (key, value) in &state.api_config.headers {
+        builder = builder.header(key, value);
+    }
+    
+    // 添加端点特定头
+    for (key, value) in &endpoint_config.headers {
+        builder = builder.header(key, value);
+    }
     
     // 转发认证头
     if let Some(auth_header) = headers.get("authorization") {
@@ -163,9 +229,6 @@ async fn proxy_models(
         // 如果请求没有认证头，使用默认API密钥
         builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
     }
-    
-    // 设置默认User-Agent
-    builder = builder.header("User-Agent", "QwenCode/0.0.14 (linux; x64)");
     
     // 发送请求
     let response = builder
@@ -210,11 +273,30 @@ async fn proxy_chat_completions_standard(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let target_url = format!("{}/v1/chat/completions", state.api_config.base_url);
     
+    // 获取端点配置，如果没有找到则使用默认配置
+    let default_config = EndpointConfig {
+        method: "POST".to_string(),
+        headers: HashMap::new(),
+        stream_support: true,
+        stream_headers: HashMap::new(),
+    };
+    let endpoint_config = state.api_config.endpoints.get("/v1/chat/completions").unwrap_or(&default_config);
+    
     // 转换请求格式（如果需要）
     let transformed_payload = transform_request(payload, &state.api_config).await;
     
     // 构建目标请求
     let mut builder = state.client.post(&target_url);
+    
+    // 添加全局配置头
+    for (key, value) in &state.api_config.headers {
+        builder = builder.header(key, value);
+    }
+    
+    // 添加端点特定头
+    for (key, value) in &endpoint_config.headers {
+        builder = builder.header(key, value);
+    }
     
     // 转发认证头，如果请求中没有则使用默认API密钥
     if let Some(auth_header) = headers.get("authorization") {
@@ -225,16 +307,6 @@ async fn proxy_chat_completions_standard(
         // 如果请求没有认证头，使用默认API密钥
         builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
     }
-    
-    // 设置内容类型
-    builder = builder.header("Content-Type", "application/json");
-    
-    // 设置User-Agent
-    builder = builder.header(
-        "User-Agent", 
-        std::env::var("USER_AGENT")
-            .unwrap_or_else(|_| "QwenCode/0.0.14 (linux; x64)".to_string())
-    );
     
     // 发送请求
     let response = builder
@@ -258,15 +330,19 @@ async fn proxy_chat_completions_standard(
     let mut result = Response::builder()
         .status(axum_status);
     
+    // 根据配置决定要转发的响应头
+    let forwarded_headers = &state.api_config.response_options.forwarded_headers;
+    
     // 转发响应头
     for (name, value) in response_headers.iter() {
         if let Ok(axum_name) = axum::http::HeaderName::from_bytes(name.as_str().as_bytes()) {
             if let Ok(axum_value) = axum::http::HeaderValue::from_str(value.to_str().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?) {
-                if name.as_str().starts_with("x-") {
-                    // 转发以x-开头的自定义头
-                    result = result.header(axum_name, axum_value);
-                } else if name.as_str() == "content-type" || name.as_str() == "content-length" {
-                    // 转发必要头
+                // 检查是否在配置的转发列表中，或是否为以x-开头的自定义头，或是否为必要头
+                let should_forward = forwarded_headers.iter().any(|h| h.eq_ignore_ascii_case(name.as_str())) ||
+                    name.as_str().starts_with("x-") ||
+                    name.as_str() == "content-type" || name.as_str() == "content-length";
+                
+                if should_forward {
                     result = result.header(axum_name, axum_value);
                 }
             }
@@ -286,11 +362,35 @@ async fn proxy_chat_completions_streaming(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let target_url = format!("{}/v1/chat/completions", state.api_config.base_url);
     
+    // 获取端点配置，如果没有找到则使用默认配置
+    let default_config = EndpointConfig {
+        method: "POST".to_string(),
+        headers: HashMap::new(),
+        stream_support: true,
+        stream_headers: HashMap::new(),
+    };
+    let endpoint_config = state.api_config.endpoints.get("/v1/chat/completions").unwrap_or(&default_config);
+    
     // 转换请求格式
     let transformed_payload = transform_request(payload, &state.api_config).await;
     
     // 构建目标请求
     let mut builder = state.client.post(&target_url);
+    
+    // 添加全局配置头
+    for (key, value) in &state.api_config.headers {
+        builder = builder.header(key, value);
+    }
+    
+    // 添加端点特定头
+    for (key, value) in &endpoint_config.headers {
+        builder = builder.header(key, value);
+    }
+    
+    // 添加流式特定头
+    for (key, value) in &endpoint_config.stream_headers {
+        builder = builder.header(key, value);
+    }
     
     // 转发认证头
     if let Some(auth_header) = headers.get("authorization") {
@@ -301,15 +401,6 @@ async fn proxy_chat_completions_streaming(
         // 如果请求没有认证头，使用默认API密钥
         builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
     }
-    
-    // 设置内容类型
-    builder = builder.header("Content-Type", "application/json");
-    
-    // 设置User-Agent（使用指定的User-Agent）
-    builder = builder.header("User-Agent", "QwenCode/0.0.14 (linux; x64)");
-    
-    // 设置Accept头以接收流式响应
-    builder = builder.header("Accept", "text/event-stream");
     
     // 发送请求
     let response = builder
@@ -357,46 +448,22 @@ async fn proxy_chat_completions_streaming(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?)
 }
 
-// API配置结构
-#[derive(Clone)]
-struct ApiConfig {
-    base_url: String,
-    model_mapping: HashMap<String, String>,  // OpenAI模型名到目标API模型名的映射
-    default_headers: HashMap<String, String>,
-}
-
-impl ApiConfig {
-    fn new() -> Self {
-        let mut model_mapping = HashMap::new();
-        // 默认模型映射 - 可以根据需要扩展
-        model_mapping.insert("gpt-3.5-turbo".to_string(), "qwen3-coder-plus".to_string());
-        model_mapping.insert("gpt-4".to_string(), "qwen3-coder-max".to_string());
-        
-        let mut default_headers = HashMap::new();
-        default_headers.insert("User-Agent".to_string(), "QwenCode/0.0.14 (linux; x64)".to_string());
-        
-        ApiConfig {
-            base_url: std::env::var("TARGET_API_BASE")
-                .unwrap_or_else(|_| "https://portal.qwen.ai".to_string()),
-            model_mapping,
-            default_headers,
-        }
-    }
-    
-    fn get_target_model(&self, openai_model: &str) -> String {
-        self.model_mapping
-            .get(openai_model)
-            .unwrap_or(&openai_model.to_string())
-            .to_string()
-    }
-}
-
-// 请求转换函数 - 根据需要转换格式
+// 请求转换函数 - 根据配置文件转换格式
 async fn transform_request(request: ChatCompletionRequest, config: &ApiConfig) -> ChatCompletionRequest {
     let mut transformed_request = request;
     
     // 模型名称转换
-    transformed_request.model = config.get_target_model(&transformed_request.model);
+    if let Some(target_model) = config.model_mapping.get(&transformed_request.model) {
+        transformed_request.model = target_model.clone();
+    }
+    
+    // 根据配置进行字段重命名
+    for (from, to) in &config.request_transforms.rename_fields {
+        if from == "max_tokens" && to == "max_completion_tokens" {
+            // 这里需要特殊处理，因为字段类型可能不同
+            // 现在只处理模型名称映射，更复杂的转换可以后续扩展
+        }
+    }
     
     // 可以添加其他转换逻辑
     // 例如，根据目标API的要求调整参数

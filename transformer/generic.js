@@ -1,0 +1,31 @@
+// 通用 API 配置模板
+module.exports = {
+  name: "generic",
+  baseUrl: "",
+  headers: {
+    "Content-Type": "application/json",
+    "User-Agent": "QwenCode/0.0.14 (linux; x64)"
+  },
+  endpoints: {
+    "/v1/chat/completions": {
+      method: "POST",
+      headers: {},
+      streamSupport: true,
+      streamHeaders: {
+        "Accept": "text/event-stream"
+      }
+    },
+    "/v1/models": {
+      method: "GET",
+      headers: {}
+    }
+  },
+  modelMapping: {},
+  requestTransforms: {
+    renameFields: {},
+    defaultValues: {}
+  },
+  responseOptions: {
+    forwardedHeaders: []
+  }
+};

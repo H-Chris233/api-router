@@ -1,0 +1,48 @@
+{
+  "name": "qwen",
+  "baseUrl": "https://portal.qwen.ai",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "QwenCode/0.0.14 (linux; x64)",
+    "Accept": "application/json"
+  },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true,
+      "streamHeaders": {
+        "Accept": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+      }
+    },
+    "/v1/models": {
+      "method": "GET",
+      "headers": {}
+    },
+    "/v1/completions": {
+      "method": "POST",
+      "headers": {}
+    }
+  },
+  "modelMapping": {
+    "gpt-3.5-turbo": "qwen3-coder-plus",
+    "gpt-4": "qwen3-coder-max",
+    "gpt-4-turbo": "qwen3-coder-turbo"
+  },
+  "requestTransforms": {
+    "renameFields": {
+      "max_tokens": "max_completion_tokens"
+    },
+    "defaultValues": {
+      "temperature": 0.7
+    }
+  },
+  "responseOptions": {
+    "forwardedHeaders": ["x-request-id", "x-ratelimit-remaining", "x-ratelimit-reset"]
+  }
+}
