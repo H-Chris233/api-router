@@ -39,7 +39,10 @@ cargo run
 ### 环境变量
 
 - `DEFAULT_API_KEY`：默认API密钥（默认：预设的示例密钥）
-- `API_CONFIG_FILE`：要使用的配置文件名（默认：qwen.json），配置文件位于transformer目录下
+
+### 命令行参数
+
+- 第一个参数：配置文件名（默认：qwen.json），配置文件位于transformer目录下
 
 ## 配置文件
 
