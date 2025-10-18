@@ -42,7 +42,13 @@ cargo run
 
 ### 命令行参数
 
-- 第一个参数：配置文件名（默认：qwen.json），配置文件位于transformer目录下
+- 第一个参数：配置文件名（不包含.json扩展名，默认：qwen），配置文件位于transformer目录下
+
+例如：
+- `cargo run -- qwen` 使用transformer/qwen.json配置文件
+- `cargo run -- openai` 使用transformer/openai.json配置文件
+- `cargo run -- generic` 使用transformer/generic.json配置文件
+- `cargo run` 使用默认transformer/qwen.json配置文件
 
 ## 配置文件
 

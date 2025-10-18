@@ -132,14 +132,17 @@ async fn main() {
     let default_api_key = std::env::var("DEFAULT_API_KEY")
         .unwrap_or_else(|_| "j88R1cKdHY1EcYk9hO5vJIrV3f4rrtI5I9NuFyyTiFLDCXRhY8ooddL72AT1NqyHKMf3iGvib2W9XBYV8duUtw".to_string());
     
-    // 从命令行参数获取配置文件名，默认为qwen.json
+    // 从命令行参数获取配置文件名，默认为qwen
     let args: Vec<String> = env::args().collect();
-    let config_file = if args.len() > 1 {
+    let config_basename = if args.len() > 1 {
         args[1].clone()
     } else {
-        "qwen.json".to_string()
+        "qwen".to_string()
     };
 
+    // 自动添加.json扩展名
+    let config_file = format!("{}.json", config_basename);
+    
     // 读取配置文件
     let config_path = format!("./transformer/{}", config_file);
     let config_content = fs::read_to_string(&config_path)
