@@ -1,0 +1,9 @@
+target/
+**/logs/
+*.log
+Cargo.lock
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
