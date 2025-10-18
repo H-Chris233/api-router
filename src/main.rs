@@ -1,503 +1,225 @@
-use axum::{
-    extract::State,
-    http::{HeaderMap, Method, Response, StatusCode},
-    response::IntoResponse,
-    routing::{get, post},
-    Json, Router,
-};
-use futures::stream::StreamExt;
-use reqwest::header;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::sync::OnceLock;
 
-// API 配置结构体
-#[derive(Debug, Deserialize, Clone)]
+use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+// 简化的API配置结构
+#[derive(Debug, Clone, Deserialize)]
 struct ApiConfig {
-    name: String,
     base_url: String,
     headers: HashMap<String, String>,
-    endpoints: HashMap<String, EndpointConfig>,
     model_mapping: HashMap<String, String>,
-    request_transforms: TransformConfig,
-    response_options: ResponseOptions,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct EndpointConfig {
-    method: String,
-    headers: HashMap<String, String>,
-    #[serde(default = "default_stream_support")]
-    stream_support: bool,
-    #[serde(default)]
-    stream_headers: HashMap<String, String>,
-}
-
-fn default_stream_support() -> bool {
-    false
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct TransformConfig {
-    rename_fields: HashMap<String, String>,
-    default_values: HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct ResponseOptions {
-    forwarded_headers: Vec<String>,
-}
-
-// 定义OpenAI兼容的请求和响应结构
-#[derive(Debug, Deserialize, Serialize, Clone)]
+// OpenAI兼容的请求结构
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct ChatCompletionRequest {
-    pub model: String,
-    pub messages: Vec<Message>,
+    model: String,
+    messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
+    temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
+    stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub n: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presence_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frequency_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logit_bias: Option<HashMap<String, f32>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
+    max_tokens: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct Message {
-    pub role: String,
-    pub content: String,
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ChatCompletionResponse {
-    pub id: String,
-    pub object: String,
-    pub created: u64,
-    pub model: String,
-    pub choices: Vec<Choice>,
-    pub usage: Option<Usage>,
+    id: String,
+    object: String,
+    created: u64,
+    model: String,
+    choices: Vec<Choice>,
+    usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct Choice {
-    pub index: u32,
-    pub message: Message,
-    pub finish_reason: Option<String>,
+    index: u32,
+    message: Message,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
 }
 
-// 服务器状态
-#[derive(Clone)]
-struct AppState {
-    client: reqwest::Client,
-    api_config: ApiConfig,
-    default_api_key: String,
+// HTTP客户端
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .build()
+            .expect("Failed to create HTTP client")
+    })
 }
 
-#[tokio::main]
-async fn main() {
-    // 初始化日志
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG")
-                .unwrap_or_else(|_| "api_router=debug,tower_http=debug".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+async fn handle_request(mut stream: tokio::net::TcpStream, addr: SocketAddr) {
+    let mut buffer = [0; 1024];
+    let _ = stream.read(&mut buffer).await;
 
+    let request = String::from_utf8_lossy(&buffer[..]);
+    let request_lines: Vec<&str> = request.lines().collect();
+
+    if request_lines.is_empty() {
+        return;
+    }
+
+    let request_line = request_lines[0];
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+
+    if parts.len() < 2 {
+        return;
+    }
+
+    let method = parts[0];
+    let path = parts[1];
+
+    let response = match (method, path) {
+        ("GET", "/health") => {
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\": \"ok\", \"message\": \"Light API Router running\"}"
+        },
+        ("GET", "/v1/models") => {
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-plus\", \"object\": \"model\", \"created\": 1677610602, \"owned_by\": \"organization-owner\"}]}"
+        },
+        ("POST", "/v1/chat/completions") => {
+            // 处理聊天完成请求
+            handle_chat_completions_request(&request).await
+        },
+        _ => {
+            "HTTP/1.1 404 NOT FOUND\r\n\r\nNot Found"
+        }
+    };
+
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.flush().await;
+}
+
+async fn handle_chat_completions_request(request: &str) -> &'static str {
     // 从环境变量获取配置
-    let default_api_key = std::env::var("DEFAULT_API_KEY")
+    let default_api_key = env::var("DEFAULT_API_KEY")
         .unwrap_or_else(|_| "j88R1cKdHY1EcYk9hO5vJIrV3f4rrtI5I9NuFyyTiFLDCXRhY8ooddL72AT1NqyHKMf3iGvib2W9XBYV8duUtw".to_string());
-    
-    // 从命令行参数获取配置文件名，默认为qwen
+
+    // 读取配置文件
     let args: Vec<String> = env::args().collect();
     let config_basename = if args.len() > 1 {
         args[1].clone()
     } else {
         "qwen".to_string()
     };
+    let config_file = format!("./transformer/{}.json", config_basename);
+    let config_content = fs::read_to_string(&config_file)
+        .unwrap_or_else(|_| fs::read_to_string("./transformer/qwen.json").unwrap());
 
-    // 自动添加.json扩展名
-    let config_file = format!("{}.json", config_basename);
-    
-    // 读取配置文件
-    let config_path = format!("./transformer/{}", config_file);
-    let config_content = fs::read_to_string(&config_path)
-        .expect(&format!("无法读取配置文件: {}", config_path));
-    
-    let api_config: ApiConfig = serde_json::from_str(&config_content)
-        .expect(&format!("无法解析配置文件: {}", config_path));
-    
-    // 创建HTTP客户端
-    let client = reqwest::Client::builder()
-        .build()
-        .expect("Failed to create HTTP client");
-
-    // 创建应用状态
-    let app_state = AppState {
-        client,
-        api_config,
-        default_api_key,
+    let config: ApiConfig = match serde_json::from_str(&config_content) {
+        Ok(c) => c,
+        Err(_) => {
+            return "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\nFailed to parse config";
+        }
     };
 
-    // 构建路由
-    let app = Router::new()
-        // OpenAI兼容的聊天完成端点
-        .route("/v1/chat/completions", post(proxy_chat_completions))
-        // 健康检查端点
-        .route("/health", get(health_check))
-        // 其他可能的OpenAI兼容端点
-        .route("/v1/models", get(proxy_models))
-        .with_state(app_state.clone())
-        // 添加CORS中间件
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-                .allow_headers(Any),
-        );
+    // 提取请求体
+    let body_start = request.find("\r\n\r\n");
+    if body_start.is_none() {
+        return "HTTP/1.1 400 BAD REQUEST\r\n\r\nNo request body";
+    }
 
-    // 运行服务器
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
-    tracing::info!("API Router 启动在 http://{}", addr);
-    tracing::info!("目标API基础URL: {}", app_state.api_config.base_url);
-    tracing::info!("使用配置文件: {}", config_file);
-    
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
+    let body = &request[body_start.unwrap() + 4..];
+    if body.is_empty() {
+        return "HTTP/1.1 400 BAD REQUEST\r\n\r\nEmpty request body";
+    }
 
-// 健康检查端点
-async fn health_check() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "status": "ok",
-        "message": "API Router 服务正常运行"
-    }))
-}
-
-// 代理模型列表
-async fn proxy_models(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let target_url = format!("{}/v1/models", state.api_config.base_url);
-    
-    // 获取端点配置，如果没有找到则使用默认配置
-    let default_config = EndpointConfig {
-        method: "GET".to_string(),
-        headers: HashMap::new(),
-        stream_support: false,
-        stream_headers: HashMap::new(),
+    // 解析请求
+    let mut chat_request: ChatCompletionRequest = match serde_json::from_str(body) {
+        Ok(req) => req,
+        Err(_) => {
+            return "HTTP/1.1 400 BAD REQUEST\r\n\r\nInvalid JSON";
+        }
     };
-    let endpoint_config = state.api_config.endpoints.get("/v1/models").unwrap_or(&default_config);
-    
-    // 构建目标请求
-    let mut builder = state.client.get(&target_url);
-    
-    // 添加全局配置头
-    for (key, value) in &state.api_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 添加端点特定头
-    for (key, value) in &endpoint_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 转发认证头
-    if let Some(auth_header) = headers.get("authorization") {
-        // 转换 header::HeaderValue 到 reqwest::header::HeaderValue
-        if let Ok(header_value) = header::HeaderValue::from_str(auth_header.to_str().map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?) {
-            builder = builder.header("Authorization", header_value);
-        }
-    } else {
-        // 如果请求没有认证头，使用默认API密钥
-        builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
-    }
-    
-    // 发送请求
-    let response = builder
-        .send()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // 将 reqwest::StatusCode 转换为 axum::http::StatusCode
-    let axum_status = StatusCode::from_u16(status.as_u16())
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid status code".to_string()))?;
-
-    Ok((axum_status, body))
-}
-
-// 代理聊天完成请求
-async fn proxy_chat_completions(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<ChatCompletionRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 检查是否需要流式响应
-    if payload.stream.unwrap_or(false) {
-        let result = proxy_chat_completions_streaming(state, headers, payload).await;
-        Ok(result?.into_response())
-    } else {
-        let result = proxy_chat_completions_standard(state, headers, payload).await;
-        Ok(result?.into_response())
-    }
-}
-
-// 标准（非流式）聊天完成代理
-async fn proxy_chat_completions_standard(
-    state: AppState,
-    headers: HeaderMap,
-    payload: ChatCompletionRequest,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let target_url = format!("{}/v1/chat/completions", state.api_config.base_url);
-    
-    // 获取端点配置，如果没有找到则使用默认配置
-    let default_config = EndpointConfig {
-        method: "POST".to_string(),
-        headers: HashMap::new(),
-        stream_support: true,
-        stream_headers: HashMap::new(),
-    };
-    let endpoint_config = state.api_config.endpoints.get("/v1/chat/completions").unwrap_or(&default_config);
-    
-    // 转换请求格式（如果需要）
-    let transformed_payload = transform_request(payload, &state.api_config).await;
-    
-    // 构建目标请求
-    let mut builder = state.client.post(&target_url);
-    
-    // 添加全局配置头
-    for (key, value) in &state.api_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 添加端点特定头
-    for (key, value) in &endpoint_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 转发认证头，如果请求中没有则使用默认API密钥
-    if let Some(auth_header) = headers.get("authorization") {
-        if let Ok(header_value) = header::HeaderValue::from_str(auth_header.to_str().map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?) {
-            builder = builder.header("Authorization", header_value);
-        }
-    } else {
-        // 如果请求没有认证头，使用默认API密钥
-        builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
-    }
-    
-    // 发送请求
-    let response = builder
-        .json(&transformed_payload)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let status = response.status();
-    let response_headers = response.headers().clone();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // 将 reqwest::StatusCode 转换为 axum::http::StatusCode
-    let axum_status = StatusCode::from_u16(status.as_u16())
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid status code".to_string()))?;
-
-    // 构建响应
-    let mut result = Response::builder()
-        .status(axum_status);
-    
-    // 根据配置决定要转发的响应头
-    let forwarded_headers = &state.api_config.response_options.forwarded_headers;
-    
-    // 转发响应头
-    for (name, value) in response_headers.iter() {
-        if let Ok(axum_name) = axum::http::HeaderName::from_bytes(name.as_str().as_bytes()) {
-            if let Ok(axum_value) = axum::http::HeaderValue::from_str(value.to_str().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?) {
-                // 检查是否在配置的转发列表中，或是否为以x-开头的自定义头，或是否为必要头
-                let should_forward = forwarded_headers.iter().any(|h| h.eq_ignore_ascii_case(name.as_str())) ||
-                    name.as_str().starts_with("x-") ||
-                    name.as_str() == "content-type" || name.as_str() == "content-length";
-                
-                if should_forward {
-                    result = result.header(axum_name, axum_value);
-                }
-            }
-        }
-    }
-
-    Ok(result
-        .body(axum::body::Body::from(body))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?)
-}
-
-// 流式聊天完成代理
-async fn proxy_chat_completions_streaming(
-    state: AppState,
-    headers: HeaderMap,
-    payload: ChatCompletionRequest,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let target_url = format!("{}/v1/chat/completions", state.api_config.base_url);
-    
-    // 获取端点配置，如果没有找到则使用默认配置
-    let default_config = EndpointConfig {
-        method: "POST".to_string(),
-        headers: HashMap::new(),
-        stream_support: true,
-        stream_headers: HashMap::new(),
-    };
-    let endpoint_config = state.api_config.endpoints.get("/v1/chat/completions").unwrap_or(&default_config);
-    
-    // 转换请求格式
-    let transformed_payload = transform_request(payload, &state.api_config).await;
-    
-    // 构建目标请求
-    let mut builder = state.client.post(&target_url);
-    
-    // 添加全局配置头
-    for (key, value) in &state.api_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 添加端点特定头
-    for (key, value) in &endpoint_config.headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 添加流式特定头
-    for (key, value) in &endpoint_config.stream_headers {
-        builder = builder.header(key, value);
-    }
-    
-    // 转发认证头
-    if let Some(auth_header) = headers.get("authorization") {
-        if let Ok(header_value) = header::HeaderValue::from_str(auth_header.to_str().map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?) {
-            builder = builder.header("Authorization", header_value);
-        }
-    } else {
-        // 如果请求没有认证头，使用默认API密钥
-        builder = builder.header("Authorization", format!("Bearer {}", state.default_api_key));
-    }
-    
-    // 发送请求
-    let response = builder
-        .json(&transformed_payload)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let error_body = response
-            .text()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        let axum_status = StatusCode::from_u16(status.as_u16())
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid status code".to_string()))?;
-        return Err((axum_status, error_body));
-    }
-
-    // 获取响应体流
-    let stream = response.bytes_stream();
-    
-    // 创建SSE响应流
-    let sse_stream = stream.map(|result| {
-        match result {
-            Ok(bytes) => {
-                // 直接传递原始字节，保持SSE格式
-                Ok::<_, std::io::Error>(bytes)
-            }
-            Err(e) => {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
-        }
-    });
-
-    // 创建SSE响应
-    use axum::body::Body;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "text/event-stream")
-        .header("cache-control", "no-cache")
-        .header("connection", "keep-alive")
-        .header("x-accel-buffering", "no") // 禁用nginx缓冲
-        .body(Body::from_stream(sse_stream))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?)
-}
-
-// 请求转换函数 - 根据配置文件转换格式
-async fn transform_request(request: ChatCompletionRequest, config: &ApiConfig) -> ChatCompletionRequest {
-    let mut transformed_request = request;
-    
     // 模型名称转换
-    if let Some(target_model) = config.model_mapping.get(&transformed_request.model) {
-        transformed_request.model = target_model.clone();
+    if let Some(target_model) = config.model_mapping.get(&chat_request.model) {
+        chat_request.model = target_model.clone();
     }
-    
-    // 根据配置进行字段重命名
-    for (from, to) in &config.request_transforms.rename_fields {
-        if from == "max_tokens" && to == "max_completion_tokens" {
-            // 这里需要特殊处理，因为字段类型可能不同
-            // 现在只处理模型名称映射，更复杂的转换可以后续扩展
+
+    // 构建目标请求
+    let target_url = format!("{}/v1/chat/completions", config.base_url);
+
+    // 构建HTTP请求
+    let mut builder = get_client().post(&target_url);
+
+    // 添加配置头
+    for (key, value) in &config.headers {
+        builder = builder.header(key, value);
+    }
+
+    // 添加认证头
+    builder = builder.header("Authorization", format!("Bearer {}", default_api_key));
+
+    // 发送请求
+    let response = match builder.json(&chat_request).send().await {
+        Ok(resp) => resp,
+        Err(_) => {
+            return "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to forward request";
+        }
+    };
+
+    let status = response.status();
+    let response_body = match response.text().await {
+        Ok(body) => body,
+        Err(_) => {
+            return "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to read response";
+        }
+    };
+
+    let response_headers = format!(
+        "HTTP/1.1 {}\r\nContent-Type: application/json\r\n\r\n{}",
+        status.as_u16(),
+        response_body
+    );
+
+    Box::leak(response_headers.into_boxed_str())
+}
+
+#[tokio::main]
+async fn main() {
+    // 从命令行参数获取端口，默认为8000
+    let args: Vec<String> = env::args().collect();
+    let port = if args.len() > 2 {
+        args[2].parse::<u16>().unwrap_or(8000)
+    } else {
+        8000
+    };
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    let listener = TcpListener::bind(addr).await.unwrap();
+    println!("Light API Router 启动在 http://{}", addr);
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                tokio::spawn(async move {
+                    handle_request(stream, addr).await;
+                });
+            }
+            Err(e) => eprintln!("Error accepting connection: {:?}", e),
         }
     }
-    
-    // 可以添加其他转换逻辑
-    // 例如，根据目标API的要求调整参数
-    
-    transformed_request
-}
-
-// SSE数据结构
-#[derive(Debug, Serialize)]
-struct SSEData {
-    id: String,
-    object: String,
-    created: u64,
-    model: String,
-    choices: Vec<ChoiceDelta>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChoiceDelta {
-    index: u32,
-    delta: Delta,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct Delta {
-    role: Option<String>,
-    content: Option<String>,
 }
