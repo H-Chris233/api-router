@@ -15,8 +15,15 @@ struct ApiConfig {
     #[serde(rename = "baseUrl")]
     base_url: String,
     headers: HashMap<String, String>,
-    #[serde(rename = "modelMapping")]
-    model_mapping: HashMap<String, String>,
+    #[serde(rename = "modelMapping", default)]
+    model_mapping: Option<HashMap<String, String>>,
+    #[serde(rename = "port", default = "default_port")]
+    port: u16,
+}
+
+// 默认端口函数
+fn default_port() -> u16 {
+    8000
 }
 
 // OpenAI兼容的请求结构
@@ -306,9 +313,12 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
     let is_streaming = chat_request.stream.unwrap_or(false);
 
     // 模型名称转换
-    if let Some(target_model) = config.model_mapping.get(&chat_request.model) {
-        chat_request.model = target_model.clone();
+    if let Some(ref model_mapping) = config.model_mapping {
+        if let Some(target_model) = model_mapping.get(&chat_request.model) {
+            chat_request.model = target_model.clone();
+        }
     }
+    // 如果model_mapping为None或映射中没有找到对应模型，则保持原始模型名称（透传）
 
     // 解析目标URL以获取主机和端口
     let url = url::Url::parse(&format!("http://{}", config.base_url.replace("https://", "").replace("http://", "")).as_str()).unwrap();
@@ -368,24 +378,71 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
 
 fn main() -> smol::io::Result<()> {
     smol::block_on(async {
-        // 从命令行参数获取端口，默认为8000
+        // 从命令行参数获取配置文件名
         let args: Vec<String> = env::args().collect();
-        let port = if args.len() > 2 {
-            args[2].parse::<u16>().unwrap_or(8000)
+        let config_basename = if args.len() > 1 {
+            args[1].clone()
         } else {
-            8000
+            "qwen".to_string()
         };
 
-        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+        // 读取配置文件以获取端口设置
+        let config_file = format!("./transformer/{}.json", config_basename);
+        let config_content = fs::read_to_string(&config_file)
+            .unwrap_or_else(|_| fs::read_to_string("./transformer/qwen.json").unwrap());
 
-        let listener = TcpListener::bind(addr).await?;
-        println!("API Router 启动在 http://{}", addr);
+        let config: ApiConfig = match serde_json::from_str(&config_content) {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("Failed to parse config, using default port 8000");
+                ApiConfig {
+                    base_url: String::new(),
+                    headers: HashMap::new(),
+                    model_mapping: None,
+                    port: 8000,
+                }
+            }
+        };
 
-        loop {
-            let (mut stream, addr) = listener.accept().await?;
-            smol::spawn(async move {
-                handle_request(stream, addr).await;
-            }).detach();
+        // 从命令行参数获取端口，如果提供则覆盖配置文件中的端口
+        let base_port = if args.len() > 2 {
+            args[2].parse::<u16>().unwrap_or(config.port)
+        } else {
+            config.port
+        };
+
+        // 端口回退机制：尝试从指定端口开始，最多尝试10个端口
+        let mut listener = None;
+        let mut used_port = 0;
+        for port_offset in 0..10 {
+            let port = base_port + port_offset;
+            let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+
+            match TcpListener::bind(addr).await {
+                Ok(l) => {
+                    listener = Some(l);
+                    used_port = port;
+                    break;
+                },
+                Err(e) => {
+                    eprintln!("端口 {} 被占用: {}, 尝试下一个端口", port, e);
+                    continue;
+                }
+            }
+        }
+
+        if let Some(listener) = listener {
+            println!("API Router 启动在 http://0.0.0.0:{}", used_port);
+
+            loop {
+                let (mut stream, addr) = listener.accept().await?;
+                smol::spawn(async move {
+                    handle_request(stream, addr).await;
+                }).detach();
+            }
+        } else {
+            eprintln!("无法绑定到任何端口，从 {} 到 {}", base_port, base_port + 9);
+            std::process::exit(1);
         }
     })
 }

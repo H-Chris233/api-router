@@ -10,5 +10,6 @@
     "gpt-3.5-turbo": "qwen3-coder-plus",
     "gpt-4": "qwen3-coder-max",
     "gpt-4-turbo": "qwen3-coder-turbo"
-  }
+  },
+  "port": 8000
 }

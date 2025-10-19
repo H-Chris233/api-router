@@ -1,9 +1,10 @@
 {
   "name": "generic",
-  "baseUrl": "https://api.example.com",
+  "baseUrl": "https://api.openai.com",
   "headers": {
     "Content-Type": "application/json",
-    "User-Agent": "api-router/1.0"
+    "User-Agent": "GenericAPI/1.0",
+    "Accept": "application/json"
   },
-  "modelMapping": {}
+  "port": 8001
 }
