@@ -8,6 +8,9 @@ use smol::net::{TcpListener, TcpStream};
 use futures_lite::AsyncReadExt;
 use futures_lite::AsyncWriteExt;
 use url::Url;
+use async_tls::TlsConnector;
+use rustls::ClientConfig;
+use webpki_roots::TLS_SERVER_ROOTS;
 
 // 简化的API配置结构
 #[derive(Debug, Clone, Deserialize)]
@@ -69,19 +72,24 @@ struct Usage {
     total_tokens: u32,
 }
 
-// 发送HTTP请求的辅助函数
+
+// 发送HTTP/HTTPS请求的辅助函数
 async fn send_http_request(
-    host: &str,
-    port: u16,
-    path: &str,
+    url: &str,
     method: &str,
     headers: &HashMap<String, String>,
     body: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let mut stream = TcpStream::connect((host, port)).await?;
+    let parsed_url = url::Url::parse(url)?;
+    let host = parsed_url.host_str().ok_or("Invalid URL: missing host")?;
+    let port = parsed_url.port_or_known_default().unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
+    let path_and_query = parsed_url.path();
 
+    let mut tcp_stream = TcpStream::connect((host, port)).await?;
+
+    // 根据协议选择是否使用TLS - 使用类型擦除来处理不同类型的流
     let mut request = String::new();
-    request.push_str(&format!("{} {} HTTP/1.1\r\n", method, path));
+    request.push_str(&format!("{} {} HTTP/1.1\r\n", method, path_and_query));
     request.push_str(&format!("Host: {}\r\n", host));
     request.push_str("Connection: close\r\n");
 
@@ -98,72 +106,148 @@ async fn send_http_request(
         request.push_str("\r\n");
     }
 
-    stream.write_all(request.as_bytes()).await?;
+    // 根据协议选择不同的处理方式
+    if parsed_url.scheme() == "https" {
+        let tls_connector = TlsConnector::new();
+        let mut tls_stream = tls_connector.connect(host, tcp_stream).await?;
+        tls_stream.write_all(request.as_bytes()).await?;
+        tls_stream.flush().await?;
 
-    // 读取响应
-    let mut response = Vec::new();
-    let mut buffer = [0; 4096];
-    loop {
-        let n = stream.read(&mut buffer).await?;
-        if n == 0 {
-            break;
+        // 读取响应
+        let mut response = Vec::new();
+        let mut buffer = [0; 4096];
+        loop {
+            let n = tls_stream.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+            response.extend_from_slice(&buffer[..n]);
         }
-        response.extend_from_slice(&buffer[..n]);
-    }
 
-    // 解析响应，找到主体部分
-    let response_str = String::from_utf8_lossy(&response);
-    if let Some(body_start) = response_str.find("\r\n\r\n") {
-        Ok(response_str[body_start + 4..].to_string())
+        // 解析响应，找到主体部分
+        let response_str = String::from_utf8_lossy(&response);
+        if let Some(body_start) = response_str.find("\r\n\r\n") {
+            Ok(response_str[body_start + 4..].to_string())
+        } else {
+            Ok(response_str.to_string())
+        }
     } else {
-        Ok(response_str.to_string())
+        // HTTP请求处理
+        tcp_stream.write_all(request.as_bytes()).await?;
+        tcp_stream.flush().await?;
+
+        // 读取响应
+        let mut response = Vec::new();
+        let mut buffer = [0; 4096];
+        loop {
+            let n = tcp_stream.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+            response.extend_from_slice(&buffer[..n]);
+        }
+
+        // 解析响应，找到主体部分
+        let response_str = String::from_utf8_lossy(&response);
+        if let Some(body_start) = response_str.find("\r\n\r\n") {
+            Ok(response_str[body_start + 4..].to_string())
+        } else {
+            Ok(response_str.to_string())
+        }
     }
 }
 
 // 处理SSE流式响应的函数
 async fn handle_streaming_request(
-    stream: &mut TcpStream,
-    host: &str,
-    port: u16,
+    client_stream: &mut TcpStream,
+    url: &str,
     path: &str,
     headers: &HashMap<String, String>,
     body: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 创建到目标API的连接
-    let mut api_stream = TcpStream::connect((host, port)).await?;
+    let parsed_url = url::Url::parse(url)?;
+    let host = parsed_url.host_str().ok_or("Invalid URL: missing host")?;
+    let port = parsed_url.port_or_known_default().unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
 
-    // 构建流式请求
-    let mut request = String::new();
-    request.push_str(&format!("POST {} HTTP/1.1\r\n", path));
-    request.push_str(&format!("Host: {}\r\n", host));
-    request.push_str("Connection: close\r\n");
+    let mut tcp_stream = TcpStream::connect((host, port)).await?;
 
-    // 添加自定义头部
-    for (key, value) in headers {
-        request.push_str(&format!("{}: {}\r\n", key, value));
-    }
+    // 根据协议选择不同的处理方式
+    if parsed_url.scheme() == "https" {
+        let tls_connector = TlsConnector::new();
+        let mut tls_stream = tls_connector.connect(host, tcp_stream).await?;
 
-    request.push_str(&format!("Content-Length: {}\r\n", body.len()));
-    request.push_str("\r\n");
-    request.push_str(body);
+        // 构建流式请求
+        let mut request = String::new();
+        request.push_str(&format!("POST {} HTTP/1.1\r\n", path));
+        request.push_str(&format!("Host: {}\r\n", host));
+        request.push_str("Connection: close\r\n");
 
-    api_stream.write_all(request.as_bytes()).await?;
-
-    // 发送SSE响应头给客户端
-    let response_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
-    stream.write_all(response_headers.as_bytes()).await?;
-
-    // 转发API响应到客户端
-    let mut buffer = [0; 4096];
-    loop {
-        let n = api_stream.read(&mut buffer).await?;
-        if n == 0 {
-            break;
+        // 添加自定义头部
+        for (key, value) in headers {
+            request.push_str(&format!("{}: {}\r\n", key, value));
         }
 
-        // 将数据写回客户端
-        stream.write_all(&buffer[..n]).await?;
-        stream.flush().await?;
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        request.push_str("\r\n");
+        request.push_str(body);
+
+        tls_stream.write_all(request.as_bytes()).await?;
+        tls_stream.flush().await?;
+
+        // 发送SSE响应头给客户端
+        let response_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
+        client_stream.write_all(response_headers.as_bytes()).await?;
+
+        // 转发API响应到客户端
+        let mut buffer = [0; 4096];
+        loop {
+            let n = tls_stream.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+
+            // 将数据写回客户端
+            client_stream.write_all(&buffer[..n]).await?;
+            client_stream.flush().await?;
+        }
+    } else {
+        // HTTP请求处理
+        let mut tcp_stream = tcp_stream;
+
+        // 构建流式请求
+        let mut request = String::new();
+        request.push_str(&format!("POST {} HTTP/1.1\r\n", path));
+        request.push_str(&format!("Host: {}\r\n", host));
+        request.push_str("Connection: close\r\n");
+
+        // 添加自定义头部
+        for (key, value) in headers {
+            request.push_str(&format!("{}: {}\r\n", key, value));
+        }
+
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        request.push_str("\r\n");
+        request.push_str(body);
+
+        tcp_stream.write_all(request.as_bytes()).await?;
+        tcp_stream.flush().await?;
+
+        // 发送SSE响应头给客户端
+        let response_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
+        client_stream.write_all(response_headers.as_bytes()).await?;
+
+        // 转发API响应到客户端
+        let mut buffer = [0; 4096];
+        loop {
+            let n = tcp_stream.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+
+            // 将数据写回客户端
+            client_stream.write_all(&buffer[..n]).await?;
+            client_stream.flush().await?;
+        }
     }
 
     Ok(())
@@ -321,9 +405,16 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
     // 如果model_mapping为None或映射中没有找到对应模型，则保持原始模型名称（透传）
 
     // 解析目标URL以获取主机和端口
-    let url = url::Url::parse(&format!("http://{}", config.base_url.replace("https://", "").replace("http://", "")).as_str()).unwrap();
+    let full_url = if config.base_url.starts_with("http://") || config.base_url.starts_with("https://") {
+        config.base_url.clone()
+    } else {
+        format!("https://{}", config.base_url)
+    };
+
+    let url = url::Url::parse(&full_url).unwrap();
     let host = url.host_str().unwrap_or("localhost");
-    let port = url.port().unwrap_or(80);
+    let port = url.port_or_known_default().unwrap_or(80);
+    let path_and_query = url.path().to_string();
 
     // 将请求序列化为JSON
     let json_body = match serde_json::to_string(&chat_request) {
@@ -342,9 +433,11 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
     request_headers.insert("Content-Type".to_string(), "application/json".to_string());
     request_headers.insert("User-Agent".to_string(), "api-router/1.0".to_string());
 
+    let target_url = format!("{}{}", full_url, path_and_query);
+
     if is_streaming {
         // 处理流式请求
-        match handle_streaming_request(stream, host, port, "/v1/chat/completions", &request_headers, &json_body).await {
+        match handle_streaming_request(stream, &full_url, "/v1/chat/completions", &request_headers, &json_body).await {
             Ok(_) => Ok(()),
             Err(_) => {
                 let response = "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to forward request";
@@ -355,7 +448,7 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
         }
     } else {
         // 处理非流式请求
-        let response_body = match send_http_request(host, port, "/v1/chat/completions", "POST", &request_headers, Some(&json_body)).await {
+        let response_body = match send_http_request(&format!("{}{}", full_url, "/v1/chat/completions"), "POST", &request_headers, Some(&json_body)).await {
             Ok(body) => body,
             Err(_) => {
                 let response = "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to forward request";
