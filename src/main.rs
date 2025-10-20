@@ -11,6 +11,8 @@ use url::Url;
 use async_tls::TlsConnector;
 use rustls::ClientConfig;
 use webpki_roots::TLS_SERVER_ROOTS;
+use log::{info, warn, error, debug};
+use thiserror::Error;
 
 // 简化的API配置结构
 #[derive(Debug, Clone, Deserialize)]
@@ -28,6 +30,28 @@ struct ApiConfig {
 fn default_port() -> u16 {
     8000
 }
+
+#[derive(Error, Debug)]
+enum RouterError {
+    #[error("URL error: {0}")]
+    Url(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Config read error: {0}")]
+    ConfigRead(String),
+    #[error("Config parse error: {0}")]
+    ConfigParse(String),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Upstream error: {0}")]
+    Upstream(String),
+    #[error("TLS error: {0}")]
+    Tls(String),
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+}
+
+type RouterResult<T> = Result<T, RouterError>;
 
 // OpenAI兼容的请求结构
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -72,6 +96,31 @@ struct Usage {
     total_tokens: u32,
 }
 
+fn build_error_response(status_code: u16, reason: &str, message: &str) -> String {
+    let body = serde_json::json!({
+        "error": {
+            "message": message,
+        }
+    }).to_string();
+    format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\n\r\n{}",
+        status_code, reason, body
+    )
+}
+
+fn map_error_to_response(err: &RouterError) -> String {
+    match err {
+        RouterError::BadRequest(msg) => build_error_response(400, "BAD REQUEST", msg),
+        RouterError::ConfigRead(msg) | RouterError::ConfigParse(msg) => {
+            build_error_response(500, "INTERNAL SERVER ERROR", msg)
+        }
+        RouterError::Url(msg) | RouterError::Tls(msg) | RouterError::Upstream(msg) => {
+            build_error_response(502, "BAD GATEWAY", msg)
+        }
+        RouterError::Io(msg) => build_error_response(500, "INTERNAL SERVER ERROR", &msg.to_string()),
+        RouterError::Json(msg) => build_error_response(400, "BAD REQUEST", &msg.to_string()),
+    }
+}
 
 // 发送HTTP/HTTPS请求的辅助函数
 async fn send_http_request(
@@ -79,21 +128,26 @@ async fn send_http_request(
     method: &str,
     headers: &HashMap<String, String>,
     body: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let parsed_url = url::Url::parse(url)?;
-    let host = parsed_url.host_str().ok_or("Invalid URL: missing host")?;
-    let port = parsed_url.port_or_known_default().unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
+) -> RouterResult<String> {
+    let parsed_url = url::Url::parse(url).map_err(|e| RouterError::Url(e.to_string()))?;
+    let host = parsed_url
+        .host_str()
+        .ok_or_else(|| RouterError::Url("Invalid URL: missing host".to_string()))?;
+    let port = parsed_url
+        .port_or_known_default()
+        .unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
     let path_and_query = parsed_url.path();
+
+    debug!("Forwarding {} {} to {}:{}", method, path_and_query, host, port);
 
     let mut tcp_stream = TcpStream::connect((host, port)).await?;
 
-    // 根据协议选择是否使用TLS - 使用类型擦除来处理不同类型的流
+    // 构建请求
     let mut request = String::new();
     request.push_str(&format!("{} {} HTTP/1.1\r\n", method, path_and_query));
     request.push_str(&format!("Host: {}\r\n", host));
     request.push_str("Connection: close\r\n");
 
-    // 添加自定义头部
     for (key, value) in headers {
         request.push_str(&format!("{}: {}\r\n", key, value));
     }
@@ -109,7 +163,10 @@ async fn send_http_request(
     // 根据协议选择不同的处理方式
     if parsed_url.scheme() == "https" {
         let tls_connector = TlsConnector::new();
-        let mut tls_stream = tls_connector.connect(host, tcp_stream).await?;
+        let mut tls_stream = tls_connector
+            .connect(host, tcp_stream)
+            .await
+            .map_err(|e| RouterError::Tls(e.to_string()))?;
         tls_stream.write_all(request.as_bytes()).await?;
         tls_stream.flush().await?;
 
@@ -164,17 +221,24 @@ async fn handle_streaming_request(
     path: &str,
     headers: &HashMap<String, String>,
     body: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let parsed_url = url::Url::parse(url)?;
-    let host = parsed_url.host_str().ok_or("Invalid URL: missing host")?;
-    let port = parsed_url.port_or_known_default().unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
+) -> RouterResult<()> {
+    let parsed_url = url::Url::parse(url).map_err(|e| RouterError::Url(e.to_string()))?;
+    let host = parsed_url
+        .host_str()
+        .ok_or_else(|| RouterError::Url("Invalid URL: missing host".to_string()))?;
+    let port = parsed_url
+        .port_or_known_default()
+        .unwrap_or(if parsed_url.scheme() == "https" { 443 } else { 80 });
 
     let mut tcp_stream = TcpStream::connect((host, port)).await?;
 
     // 根据协议选择不同的处理方式
     if parsed_url.scheme() == "https" {
         let tls_connector = TlsConnector::new();
-        let mut tls_stream = tls_connector.connect(host, tcp_stream).await?;
+        let mut tls_stream = tls_connector
+            .connect(host, tcp_stream)
+            .await
+            .map_err(|e| RouterError::Tls(e.to_string()))?;
 
         // 构建流式请求
         let mut request = String::new();
@@ -212,8 +276,6 @@ async fn handle_streaming_request(
         }
     } else {
         // HTTP请求处理
-        let mut tcp_stream = tcp_stream;
-
         // 构建流式请求
         let mut request = String::new();
         request.push_str(&format!("POST {} HTTP/1.1\r\n", path));
@@ -254,6 +316,8 @@ async fn handle_streaming_request(
 }
 
 async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
+    debug!("New connection from {}", addr);
+
     // 读取完整的HTTP请求（可能需要多次读取）
     let mut request_bytes = Vec::new();
     let mut buffer = [0; 4096];
@@ -285,7 +349,10 @@ async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
                     continue;
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                warn!("Failed to read from {}: {}", addr, e);
+                break
+            },
         }
     }
 
@@ -306,27 +373,38 @@ async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
     let method = parts[0];
     let path = parts[1];
 
-    let response = match (method, path) {
+    match (method, path) {
         ("GET", "/health") => {
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\": \"ok\", \"message\": \"Light API Router running\"}"
-        },
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\": \"ok\", \"message\": \"Light API Router running\"}";
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.flush().await;
+            return;
+        }
         ("GET", "/v1/models") => {
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-plus\", \"object\": \"model\", \"created\": 1677610602, \"owned_by\": \"organization-owner\"}]}"
-        },
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-plus\", \"object\": \"model\", \"created\": 1677610602, \"owned_by\": \"organization-owner\"}]}";
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.flush().await;
+            return;
+        }
         ("POST", "/v1/chat/completions") => {
             // 处理聊天完成请求
             match handle_chat_completions_request(&request, &mut stream).await {
                 Ok(_) => return, // 如果是流式请求，handle_chat_completions_request会直接处理并返回
-                Err(response) => response,
+                Err(err) => {
+                    let response = map_error_to_response(&err);
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.flush().await;
+                    return;
+                }
             }
-        },
-        _ => {
-            "HTTP/1.1 404 NOT FOUND\r\n\r\nNot Found"
         }
-    };
-
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.flush().await;
+        _ => {
+            let response = "HTTP/1.1 404 NOT FOUND\r\n\r\nNot Found";
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.flush().await;
+            return;
+        }
+    }
 }
 
 // 从HTTP头部提取Content-Length
@@ -339,7 +417,7 @@ fn extract_content_length(headers: &str) -> Option<usize> {
     None
 }
 
-async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) -> Result<(), &'static str> {
+async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) -> RouterResult<()> {
     // 从环境变量获取配置
     let default_api_key = env::var("DEFAULT_API_KEY")
         .unwrap_or_else(|_| "j88R1cKdHY1EcYk9hO5vJIrV3f4rrtI5I9NuFyyTiFLDCXRhY8ooddL72AT1NqyHKMf3iGvib2W9XBYV8duUtw".to_string());
@@ -352,46 +430,29 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
         "qwen".to_string()
     };
     let config_file = format!("./transformer/{}.json", config_basename);
-    let config_content = fs::read_to_string(&config_file)
-        .unwrap_or_else(|_| fs::read_to_string("./transformer/qwen.json").unwrap());
+    let config_content = fs::read_to_string(&config_file).or_else(|e| {
+        warn!("Failed to read config {}: {}. Falling back to transformer/qwen.json", config_file, e);
+        fs::read_to_string("./transformer/qwen.json").map_err(|e2| RouterError::ConfigRead(e2.to_string()))
+    })?;
 
-    let config: ApiConfig = match serde_json::from_str(&config_content) {
-        Ok(c) => c,
-        Err(_) => {
-            let response = "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\nFailed to parse config";
-            let _ = stream.write_all(response.as_bytes()).await;
-            let _ = stream.flush().await;
-            return Err(response);
-        }
-    };
+    let mut config: ApiConfig = serde_json::from_str(&config_content)
+        .map_err(|e| RouterError::ConfigParse(e.to_string()))?;
 
     // 提取请求体
     let body_start = request.find("\r\n\r\n");
-    if body_start.is_none() {
-        let response = "HTTP/1.1 400 BAD REQUEST\r\n\r\nNo request body";
-        let _ = stream.write_all(response.as_bytes()).await;
-        let _ = stream.flush().await;
-        return Err(response);
-    }
+    let body = match body_start {
+        Some(pos) => &request[pos + 4..],
+        None => {
+            return Err(RouterError::BadRequest("No request body".to_string()));
+        }
+    };
 
-    let body = &request[body_start.unwrap() + 4..];
     if body.is_empty() {
-        let response = "HTTP/1.1 400 BAD REQUEST\r\n\r\nEmpty request body";
-        let _ = stream.write_all(response.as_bytes()).await;
-        let _ = stream.flush().await;
-        return Err(response);
+        return Err(RouterError::BadRequest("Empty request body".to_string()));
     }
 
     // 解析请求
-    let mut chat_request: ChatCompletionRequest = match serde_json::from_str(body) {
-        Ok(req) => req,
-        Err(_) => {
-            let response = "HTTP/1.1 400 BAD REQUEST\r\n\r\nInvalid JSON";
-            let _ = stream.write_all(response.as_bytes()).await;
-            let _ = stream.flush().await;
-            return Err(response);
-        }
-    };
+    let mut chat_request: ChatCompletionRequest = serde_json::from_str(body)?;
 
     // 检查是否为流式请求
     let is_streaming = chat_request.stream.unwrap_or(false);
@@ -404,28 +465,16 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
     }
     // 如果model_mapping为None或映射中没有找到对应模型，则保持原始模型名称（透传）
 
-    // 解析目标URL以获取主机和端口
+    // 解析目标URL
     let full_url = if config.base_url.starts_with("http://") || config.base_url.starts_with("https://") {
         config.base_url.clone()
     } else {
         format!("https://{}", config.base_url)
     };
 
-    let url = url::Url::parse(&full_url).unwrap();
-    let host = url.host_str().unwrap_or("localhost");
-    let port = url.port_or_known_default().unwrap_or(80);
-    let path_and_query = url.path().to_string();
-
     // 将请求序列化为JSON
-    let json_body = match serde_json::to_string(&chat_request) {
-        Ok(json) => json,
-        Err(_) => {
-            let response = "HTTP/1.1 400 BAD REQUEST\r\n\r\nInvalid request body";
-            let _ = stream.write_all(response.as_bytes()).await;
-            let _ = stream.flush().await;
-            return Err(response);
-        }
-    };
+    let json_body = serde_json::to_string(&chat_request)
+        .map_err(|_| RouterError::BadRequest("Invalid request body".to_string()))?;
 
     // 准备请求头
     let mut request_headers = config.headers.clone();
@@ -433,43 +482,31 @@ async fn handle_chat_completions_request(request: &str, stream: &mut TcpStream) 
     request_headers.insert("Content-Type".to_string(), "application/json".to_string());
     request_headers.insert("User-Agent".to_string(), "api-router/1.0".to_string());
 
-    let target_url = format!("{}{}", full_url, path_and_query);
-
     if is_streaming {
         // 处理流式请求
-        match handle_streaming_request(stream, &full_url, "/v1/chat/completions", &request_headers, &json_body).await {
-            Ok(_) => Ok(()),
-            Err(_) => {
-                let response = "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to forward request";
-                let _ = stream.write_all(response.as_bytes()).await;
-                let _ = stream.flush().await;
-                Err(response)
-            }
-        }
+        handle_streaming_request(stream, &full_url, "/v1/chat/completions", &request_headers, &json_body).await?;
+        Ok(())
     } else {
         // 处理非流式请求
-        let response_body = match send_http_request(&format!("{}{}", full_url, "/v1/chat/completions"), "POST", &request_headers, Some(&json_body)).await {
-            Ok(body) => body,
-            Err(_) => {
-                let response = "HTTP/1.1 502 BAD GATEWAY\r\n\r\nFailed to forward request";
-                let _ = stream.write_all(response.as_bytes()).await;
-                let _ = stream.flush().await;
-                return Err(response);
-            }
-        };
+        let response_body = send_http_request(&format!("{}{}", full_url, "/v1/chat/completions"), "POST", &request_headers, Some(&json_body)).await?;
 
         // 发送响应
         let response_headers = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}",
             response_body
         );
-        let _ = stream.write_all(response_headers.as_bytes()).await;
-        let _ = stream.flush().await;
+        stream.write_all(response_headers.as_bytes()).await?;
+        stream.flush().await?;
         Ok(())
     }
 }
 
 fn main() -> smol::io::Result<()> {
+    // 初始化日志
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info")
+    ).try_init();
+
     smol::block_on(async {
         // 从命令行参数获取配置文件名
         let args: Vec<String> = env::args().collect();
@@ -481,13 +518,24 @@ fn main() -> smol::io::Result<()> {
 
         // 读取配置文件以获取端口设置
         let config_file = format!("./transformer/{}.json", config_basename);
-        let config_content = fs::read_to_string(&config_file)
-            .unwrap_or_else(|_| fs::read_to_string("./transformer/qwen.json").unwrap());
+        let config_content = match fs::read_to_string(&config_file) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to read config {}: {}. Falling back to transformer/qwen.json", config_file, e);
+                match fs::read_to_string("./transformer/qwen.json") {
+                    Ok(c2) => c2,
+                    Err(e2) => {
+                        error!("Failed to read fallback config transformer/qwen.json: {}. Using default port 8000", e2);
+                        String::from("{\"port\":8000,\"baseUrl\":\"\",\"headers\":{}}")
+                    }
+                }
+            }
+        };
 
         let config: ApiConfig = match serde_json::from_str(&config_content) {
             Ok(c) => c,
-            Err(_) => {
-                eprintln!("Failed to parse config, using default port 8000");
+            Err(e) => {
+                warn!("Failed to parse config, using default port 8000: {}", e);
                 ApiConfig {
                     base_url: String::new(),
                     headers: HashMap::new(),
@@ -499,7 +547,13 @@ fn main() -> smol::io::Result<()> {
 
         // 从命令行参数获取端口，如果提供则覆盖配置文件中的端口
         let base_port = if args.len() > 2 {
-            args[2].parse::<u16>().unwrap_or(config.port)
+            match args[2].parse::<u16>() {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Invalid port argument '{}': {}. Using configured/default port {}", args[2], e, config.port);
+                    config.port
+                }
+            }
         } else {
             config.port
         };
@@ -518,23 +572,29 @@ fn main() -> smol::io::Result<()> {
                     break;
                 },
                 Err(e) => {
-                    eprintln!("端口 {} 被占用: {}, 尝试下一个端口", port, e);
+                    warn!("端口 {} 被占用: {}, 尝试下一个端口", port, e);
                     continue;
                 }
             }
         }
 
         if let Some(listener) = listener {
-            println!("API Router 启动在 http://0.0.0.0:{}", used_port);
+            info!("API Router 启动在 http://0.0.0.0:{}", used_port);
 
             loop {
-                let (mut stream, addr) = listener.accept().await?;
+                let (stream, addr) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Failed to accept connection: {}", e);
+                        continue;
+                    }
+                };
                 smol::spawn(async move {
                     handle_request(stream, addr).await;
                 }).detach();
             }
         } else {
-            eprintln!("无法绑定到任何端口，从 {} 到 {}", base_port, base_port + 9);
+            error!("无法绑定到任何端口，从 {} 到 {}", base_port, base_port + 9);
             std::process::exit(1);
         }
     })
