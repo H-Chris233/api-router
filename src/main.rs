@@ -259,7 +259,7 @@ async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
     let mut buffer = [0; 4096];
 
     // 读取直到遇到请求体结束或达到超时
-    for _ in 0..100 { // 限制读取次数避免无限循环
+    for _ in 0..1000 { // 限制读取次数避免无限循环
         match stream.read(&mut buffer).await {
             Ok(0) => break, // 连接到达EOF
             Ok(n) => {
