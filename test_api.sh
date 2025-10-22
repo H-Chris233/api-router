@@ -1,9 +1,14 @@
 #!/bin/bash
 
-echo "测试API转发功能..."
+CONFIG="${1:-qwen}"
+PORT="${2:-8000}"
+
+echo "测试API转发功能 (transformer/${CONFIG}.json @ port ${PORT})..."
+
+echo "提示：在另一个终端执行 'cargo run -- ${CONFIG} ${PORT}' 以启动代理服务。"
 
 # 设置基础URL
-BASE_URL="http://localhost:8000"
+BASE_URL="http://localhost:${PORT}"
 
 # 测试健康检查端点
 echo "测试健康检查端点..."
@@ -21,7 +26,7 @@ curl -s -X POST "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3-coder-plus",
+    "model": "gpt-3.5-turbo",
     "messages": [
       {
         "role": "user",
