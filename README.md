@@ -1,22 +1,22 @@
 # API Router
 
-一个将API请求转发为OpenAI兼容格式的服务，特别适用于将具有特殊认证要求的API转换为标准OpenAI格式。
+一个将 API 请求转发为 OpenAI 兼容格式的轻量级服务，特别适用于将具有特殊认证或签名要求的 API 转换为标准 OpenAI 客户端可以直接使用的格式。
 
 ## 功能特性
 
-- 将非标准API请求转换为OpenAI兼容格式
-- 支持流式传输（SSE）
-- 自动处理认证头和User-Agent
-- 支持模型名称映射
-- 支持对话上下文传递
-- CORS支持
-- **动态配置加载**：从transformer目录的JSON文件中动态加载API配置
+- 将非标准 API 请求转换为 OpenAI 兼容格式
+- 支持流式传输（SSE）转发
+- 自动处理认证头、User-Agent 以及基础请求头
+- 支持模型名称映射（client model ➜ provider model）
+- 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
+- 自动处理音频转写/翻译请求的 multipart/form-data 载荷
+- 动态加载 transformer 目录中的 JSON 配置文件
 
 ## 安装与运行
 
 ### 依赖
 
-- Rust 1.90.0 或更高版本
+- Rust 1.70.0 或更高版本
 
 ### 构建与运行
 
@@ -30,36 +30,32 @@ cargo build --release
 
 # 设置环境变量
 export DEFAULT_API_KEY="your-api-key-here"
-export API_CONFIG_FILE="qwen.json"  # 指定要使用的配置文件
 
-# 运行服务
+# 运行服务（默认使用 transformer/qwen.json）
 cargo run
 ```
 
-### 环境变量
-
-- `DEFAULT_API_KEY`：默认API密钥（默认：预设的示例密钥）
-
 ### 命令行参数
 
-- 第一个参数：配置文件名（不包含.json扩展名，默认：qwen），配置文件位于transformer目录下
+- 第一个参数：配置文件名（不包含 `.json` 后缀，默认 `qwen`）。配置文件位置固定在 `transformer/` 目录下。
+- 第二个参数（可选）：端口号。如果未提供则使用配置文件中的 `port` 字段。
 
-例如：
-- `cargo run -- qwen` 使用transformer/qwen.json配置文件
-- `cargo run -- openai` 使用transformer/openai.json配置文件
-- `cargo run -- generic` 使用transformer/generic.json配置文件
-- `cargo run` 使用默认transformer/qwen.json配置文件
+示例：
+
+- `cargo run -- qwen` 使用 `transformer/qwen.json`
+- `cargo run -- openai 9000` 使用 `transformer/openai.json` 并监听 9000 端口
 
 ## 配置文件
 
-API Router 现在支持从transformer目录中的JSON文件动态加载配置，支持：
-- API基本URL设置
-- 请求头配置
-- 端点特殊选项配置
-- 模型名称映射
-- 请求/响应转换规则
+API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 
-### 配置文件格式
+- 基础 URL (`baseUrl`)
+- 默认请求头 (`headers`)
+- 多端点独立设置（额外头部、自定义上游路径、是否需要 multipart 等）
+- 模型名称映射 (`modelMapping`)
+- 自定义监听端口 (`port`)
+
+### 配置示例
 
 ```json
 {
@@ -72,62 +68,50 @@ API Router 现在支持从transformer目录中的JSON文件动态加载配置，
   },
   "endpoints": {
     "/v1/chat/completions": {
-      "method": "POST",
       "headers": {
         "Accept": "application/json, text/event-stream"
       },
-      "streamSupport": true,
-      "streamHeaders": {
-        "Accept": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no"
-      }
+      "streamSupport": true
+    },
+    "/v1/completions": {
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true
+    },
+    "/v1/embeddings": {},
+    "/v1/audio/transcriptions": {
+      "requiresMultipart": true
+    },
+    "/v1/audio/translations": {
+      "requiresMultipart": true
     }
   },
   "modelMapping": {
     "gpt-3.5-turbo": "qwen3-coder-plus",
     "gpt-4": "qwen3-coder-max"
   },
-  "requestTransforms": {
-    "renameFields": {
-      "max_tokens": "max_completion_tokens"
-    },
-    "defaultValues": {
-      "temperature": 0.7
-    }
-  },
-  "responseOptions": {
-    "forwardedHeaders": ["x-request-id", "x-ratelimit-remaining"]
-  }
+  "port": 8000
 }
 ```
 
-## API 端点
-
-### 聊天完成
-- `POST /v1/chat/completions` - 转发聊天完成请求
-
-### 模型列表
-- `GET /v1/models` - 获取可用模型列表
-
-### 健康检查
-- `GET /health` - 检查服务状态
+`endpoints` 字段允许针对不同路由覆盖上游 Header、是否支持流式转发以及是否需要特殊处理（如 multipart 音频上传）。
 
 ## API 端点
 
-### 聊天完成
-- `POST /v1/chat/completions` - 转发聊天完成请求
-
-### 模型列表
-- `GET /v1/models` - 获取可用模型列表
-
-### 健康检查
-- `GET /health` - 检查服务状态
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET  | `/health` | 健康检查 |
+| GET  | `/v1/models` | 返回可用模型列表（示例数据） |
+| POST | `/v1/chat/completions` | Chat Completions 代理，支持流式 |
+| POST | `/v1/completions` | Text Completions 代理，支持流式 |
+| POST | `/v1/embeddings` | Embeddings 代理 |
+| POST | `/v1/audio/transcriptions` | 音频转写代理（multipart/form-data） |
+| POST | `/v1/audio/translations` | 音频翻译代理（multipart/form-data） |
 
 ## 使用示例
 
-### 非流式请求
+### Chat Completions（非流式）
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
@@ -135,40 +119,70 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{
     "model": "qwen3-coder-plus",
     "messages": [
-      {
-        "role": "user",
-        "content": "你好，请介绍一下你自己。"
-      }
+      {"role": "user", "content": "你好，请介绍一下你自己。"}
     ],
     "temperature": 0.7,
     "max_tokens": 1500
   }'
 ```
 
-### 流式请求
+### Chat Completions（SSE 流式）
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -N -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d '{
     "model": "qwen3-coder-plus",
     "messages": [
-      {
-        "role": "user",
-        "content": "你好，请介绍一下你自己。"
-      }
+      {"role": "user", "content": "请用中文解释 Rust 的 async/await。"}
     ],
-    "temperature": 0.7,
-    "max_tokens": 1500,
     "stream": true
   }'
 ```
 
-## 配置
+### Text Completions
+```bash
+curl -X POST http://localhost:8000/v1/completions \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "Write a haiku about async Rust",
+    "max_tokens": 64,
+    "stream": false
+  }'
+```
 
-可以通过修改 `src/main.rs` 中的 `ApiConfig` 结构来自定义模型映射和其他配置。
+### Embeddings
+```bash
+curl -X POST http://localhost:8000/v1/embeddings \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "input": "你好，世界"
+  }'
+```
+
+### 音频转写（multipart/form-data）
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer your-api-key" \
+  -F "file=@sample.wav" \
+  -F "model=whisper-1" \
+  -F "response_format=json"
+```
+
+### 音频翻译（multipart/form-data）
+```bash
+curl -X POST http://localhost:8000/v1/audio/translations \
+  -H "Authorization: Bearer your-api-key" \
+  -F "file=@sample.wav" \
+  -F "model=whisper-1" \
+  -F "prompt=Translate this recording"
+```
 
 ## 许可证
 
-MIT 许可证
+MIT License
