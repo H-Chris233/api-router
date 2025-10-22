@@ -1,0 +1,32 @@
+{
+  "name": "cohere",
+  "baseUrl": "https://api.cohere.com",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "api-router/1.0",
+    "Accept": "application/json",
+    "Cohere-Version": "2024-06-24"
+  },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "upstreamPath": "/v1/chat",
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true
+    },
+    "/v1/completions": {
+      "upstreamPath": "/v1/generate"
+    },
+    "/v1/embeddings": {
+      "upstreamPath": "/v1/embed"
+    }
+  },
+  "modelMapping": {
+    "gpt-4o": "command-r-plus",
+    "gpt-4": "command-r-plus",
+    "gpt-4o-mini": "command-r",
+    "gpt-3.5-turbo": "command-light"
+  },
+  "port": 8000
+}

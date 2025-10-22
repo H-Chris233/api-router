@@ -44,6 +44,13 @@ cargo run
 
 - `cargo run -- qwen` 使用 `transformer/qwen.json`
 - `cargo run -- openai 9000` 使用 `transformer/openai.json` 并监听 9000 端口
+- `cargo run -- anthropic` 使用 `transformer/anthropic.json`
+- `cargo run -- cohere` 使用 `transformer/cohere.json`
+- `cargo run -- gemini` 使用 `transformer/gemini.json`
+
+当前仓库预置的 transformer 配置包括 `qwen`（默认）、`openai`、`anthropic`、`cohere` 与 `gemini`，可通过上述参数快速切换不同的上游提供商。
+
+配套的 `test_api.sh` 脚本同样接受配置名与端口参数，例如 `./test_api.sh anthropic 9000` 会针对运行在 9000 端口且使用 `transformer/anthropic.json` 的服务发起请求示例。
 
 ## 配置文件
 
@@ -51,7 +58,7 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 
 - 基础 URL (`baseUrl`)
 - 默认请求头 (`headers`)
-- 多端点独立设置（额外头部、自定义上游路径、是否需要 multipart 等）
+- 多端点独立设置（自定义上游路径/HTTP 方法、额外头部、流式与 multipart 支持）
 - 模型名称映射 (`modelMapping`)
 - 自定义监听端口 (`port`)
 
@@ -95,7 +102,7 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 }
 ```
 
-`endpoints` 字段允许针对不同路由覆盖上游 Header、是否支持流式转发以及是否需要特殊处理（如 multipart 音频上传）。
+`endpoints` 字段允许针对不同路由覆盖上游 Header、转发路径 (`upstreamPath`)、HTTP 方法 (`method`)、是否支持流式转发以及是否需要特殊处理（如 multipart 音频上传）。
 
 ## API 端点
 

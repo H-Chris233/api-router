@@ -138,6 +138,9 @@ fn normalized_base_url(base: &str) -> String {
 }
 
 fn join_base_and_path(base: &str, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        return path.to_string();
+    }
     if base.is_empty() {
         return path.to_string();
     }
@@ -151,11 +154,39 @@ fn join_base_and_path(base: &str, path: &str) -> String {
 }
 
 fn compute_upstream_path(request_target: &str, endpoint: &EndpointConfig) -> String {
-    let raw_path = endpoint.upstream_path.as_deref().unwrap_or(request_target);
-    if raw_path.starts_with('/') {
-        raw_path.to_string()
+    let normalize = |path: &str| {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            path.to_string()
+        } else if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        }
+    };
+
+    if let Some(upstream) = endpoint.upstream_path.as_deref() {
+        let mut path = normalize(upstream);
+        if let Some(query_index) = request_target.find('?') {
+            let query = &request_target[query_index + 1..];
+            if path.contains('?') {
+                if !query.is_empty() {
+                    if !path.ends_with('?') && !path.ends_with('&') {
+                        path.push('&');
+                    }
+                    path.push_str(query);
+                }
+            } else if !query.is_empty() {
+                path.push('?');
+                path.push_str(query);
+            } else {
+                path.push('?');
+            }
+        }
+        path
+    } else if request_target.starts_with('/') {
+        request_target.to_string()
     } else {
-        format!("/{}", raw_path)
+        format!("/{}", request_target)
     }
 }
 
@@ -634,6 +665,119 @@ mod tests {
         let client = TcpStream::connect(addr).await?;
         let (server, _) = listener.accept().await?;
         Ok((server, client))
+    }
+
+    #[test]
+    fn compute_path_uses_override_and_preserves_query() {
+        let endpoint = EndpointConfig {
+            upstream_path: Some("/v1/messages".to_string()),
+            ..Default::default()
+        };
+        let result = compute_upstream_path("/v1/chat/completions?foo=bar", &endpoint);
+        assert_eq!(result, "/v1/messages?foo=bar");
+    }
+
+    #[test]
+    fn compute_path_falls_back_to_request_target_when_no_override() {
+        let endpoint = EndpointConfig::default();
+        let result = compute_upstream_path("/v1/chat/completions?foo=bar", &endpoint);
+        assert_eq!(result, "/v1/chat/completions?foo=bar");
+    }
+
+    #[test]
+    fn compute_path_merges_query_with_configured_query() {
+        let endpoint = EndpointConfig {
+            upstream_path: Some("/v1/messages?mode=raw".to_string()),
+            ..Default::default()
+        };
+        let result = compute_upstream_path("/v1/chat/completions?foo=bar", &endpoint);
+        assert_eq!(result, "/v1/messages?mode=raw&foo=bar");
+    }
+
+    #[test]
+    fn chat_completions_respects_endpoint_overrides() {
+        let expected_body = b"{\"id\":\"anthropic\"}".to_vec();
+        let send_called = Arc::new(Mutex::new(false));
+        let send_called_clone = Arc::clone(&send_called);
+
+        let response_bytes = with_mock_http_client(
+            Box::new(move |url, method, headers, body| {
+                *send_called_clone.lock().unwrap() = true;
+                assert_eq!(url, "https://api.override/v1/messages?mode=test");
+                assert_eq!(method, "PATCH");
+                assert_eq!(
+                    headers.get("Accept"),
+                    Some(&"application/json".to_string())
+                );
+                let payload: ChatCompletionRequest =
+                    serde_json::from_slice(body.expect("body")).unwrap();
+                assert_eq!(payload.model, "claude-3-haiku");
+                Ok(expected_body.clone())
+            }),
+            || {
+                smol::block_on(async {
+                    let config: ApiConfig = serde_json::from_str(
+                        r#"{
+                            "baseUrl": "https://api.override",
+                            "modelMapping": {"gpt-3.5-turbo": "claude-3-haiku"},
+                            "endpoints": {
+                                "/v1/chat/completions": {
+                                    "upstreamPath": "/v1/messages",
+                                    "method": "patch",
+                                    "headers": {"Accept": "application/json"}
+                                }
+                            },
+                            "port": 8000
+                        }"#,
+                    )
+                    .unwrap();
+
+                    let body = serde_json::json!({
+                        "model": "gpt-3.5-turbo",
+                        "messages": [
+                            {"role": "user", "content": "ping"}
+                        ]
+                    });
+                    let mut headers = HashMap::new();
+                    headers.insert(
+                        "authorization".to_string(),
+                        "Bearer client-key".to_string(),
+                    );
+                    headers.insert(
+                        "content-type".to_string(),
+                        "application/json".to_string(),
+                    );
+
+                    let parsed_request = ParsedRequest {
+                        method: "POST".to_string(),
+                        target: "/v1/chat/completions?mode=test".to_string(),
+                        version: "HTTP/1.1".to_string(),
+                        headers,
+                        body: serde_json::to_vec(&body).unwrap(),
+                    };
+
+                    let (mut server_stream, mut client_stream) = tcp_pair().await.unwrap();
+                    handle_chat_completions(
+                        &parsed_request,
+                        &mut server_stream,
+                        &config,
+                        "default-key",
+                    )
+                    .await
+                    .unwrap();
+                    drop(server_stream);
+
+                    let mut buf = vec![0u8; 512];
+                    let n = client_stream.read(&mut buf).await.unwrap();
+                    buf.truncate(n);
+                    buf
+                })
+            },
+        );
+
+        let response = String::from_utf8(response_bytes).unwrap();
+        assert!(response.contains("\"id\":\"anthropic\""));
+        assert!(*send_called.lock().unwrap());
     }
 
     #[test]

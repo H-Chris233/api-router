@@ -40,3 +40,47 @@ impl ApiConfig {
 pub fn default_port() -> u16 {
     8000
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_endpoint_overrides_and_methods() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "endpoints": {
+                    "/v1/chat/completions": {
+                        "upstreamPath": "/v1/messages",
+                        "method": "patch",
+                        "headers": {"X-Test": "1"}
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let endpoint = config.endpoint("/v1/chat/completions");
+        assert_eq!(endpoint.upstream_path.as_deref(), Some("/v1/messages"));
+        assert_eq!(endpoint.method.as_deref(), Some("patch"));
+        assert_eq!(endpoint.headers.get("X-Test"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn endpoint_defaults_when_not_configured() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test"
+            }"#,
+        )
+        .unwrap();
+
+        let endpoint = config.endpoint("/v1/chat/completions");
+        assert!(endpoint.upstream_path.is_none());
+        assert!(endpoint.method.is_none());
+        assert!(endpoint.headers.is_empty());
+        assert!(!endpoint.stream_support);
+        assert!(!endpoint.requires_multipart);
+    }
+}
