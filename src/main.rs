@@ -1,8 +1,8 @@
 mod config;
 mod errors;
-mod models;
-mod http_client;
 mod handlers;
+mod http_client;
+mod models;
 
 use config::ApiConfig;
 use handlers::handle_request;
@@ -11,14 +11,13 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 
+use log::{error, info, warn};
 use smol::net::TcpListener;
-use log::{info, warn, error};
 
 fn main() -> smol::io::Result<()> {
     // 初始化日志
-    let _ = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info")
-    ).try_init();
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .try_init();
 
     smol::block_on(async {
         // 从命令行参数获取配置文件名
@@ -34,7 +33,10 @@ fn main() -> smol::io::Result<()> {
         let config_content = match fs::read_to_string(&config_file) {
             Ok(c) => c,
             Err(e) => {
-                warn!("Failed to read config {}: {}. Falling back to transformer/qwen.json", config_file, e);
+                warn!(
+                    "Failed to read config {}: {}. Falling back to transformer/qwen.json",
+                    config_file, e
+                );
                 match fs::read_to_string("./transformer/qwen.json") {
                     Ok(c2) => c2,
                     Err(e2) => {
@@ -53,6 +55,7 @@ fn main() -> smol::io::Result<()> {
                     base_url: String::new(),
                     headers: HashMap::new(),
                     model_mapping: None,
+                    endpoints: HashMap::new(),
                     port: 8000,
                 }
             }
@@ -63,7 +66,10 @@ fn main() -> smol::io::Result<()> {
             match args[2].parse::<u16>() {
                 Ok(p) => p,
                 Err(e) => {
-                    warn!("Invalid port argument '{}': {}. Using configured/default port {}", args[2], e, config.port);
+                    warn!(
+                        "Invalid port argument '{}': {}. Using configured/default port {}",
+                        args[2], e, config.port
+                    );
                     config.port
                 }
             }
@@ -83,7 +89,7 @@ fn main() -> smol::io::Result<()> {
                     listener = Some(l);
                     used_port = port;
                     break;
-                },
+                }
                 Err(e) => {
                     warn!("端口 {} 被占用: {}, 尝试下一个端口", port, e);
                     continue;
@@ -104,7 +110,8 @@ fn main() -> smol::io::Result<()> {
                 };
                 smol::spawn(async move {
                     handle_request(stream, addr).await;
-                }).detach();
+                })
+                .detach();
             }
         } else {
             error!("无法绑定到任何端口，从 {} 到 {}", base_port, base_port + 9);

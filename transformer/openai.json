@@ -6,6 +6,27 @@
     "User-Agent": "api-router/1.0",
     "Accept": "application/json"
   },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true
+    },
+    "/v1/completions": {
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true
+    },
+    "/v1/embeddings": {},
+    "/v1/audio/transcriptions": {
+      "requiresMultipart": true
+    },
+    "/v1/audio/translations": {
+      "requiresMultipart": true
+    }
+  },
   "modelMapping": {
     "qwen3-coder-plus": "gpt-3.5-turbo",
     "qwen3-coder-max": "gpt-4"
