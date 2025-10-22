@@ -6,18 +6,30 @@
     "User-Agent": "QwenCode/0.0.14 (linux; x64)",
     "Accept": "application/json"
   },
+  "rateLimit": {
+    "requestsPerMinute": 120,
+    "burst": 40
+  },
   "endpoints": {
     "/v1/chat/completions": {
       "headers": {
         "Accept": "application/json, text/event-stream"
       },
-      "streamSupport": true
+      "streamSupport": true,
+      "rateLimit": {
+        "requestsPerMinute": 60,
+        "burst": 25
+      }
     },
     "/v1/completions": {
       "headers": {
         "Accept": "application/json, text/event-stream"
       },
-      "streamSupport": true
+      "streamSupport": true,
+      "rateLimit": {
+        "requestsPerMinute": 60,
+        "burst": 25
+      }
     },
     "/v1/embeddings": {},
     "/v1/audio/transcriptions": {

@@ -1,6 +1,14 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct RateLimitConfig {
+    #[serde(rename = "requestsPerMinute")]
+    pub requests_per_minute: Option<u32>,
+    #[serde(default)]
+    pub burst: Option<u32>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct EndpointConfig {
     #[serde(rename = "upstreamPath")]
@@ -13,6 +21,8 @@ pub struct EndpointConfig {
     pub stream_support: bool,
     #[serde(rename = "requiresMultipart", default)]
     pub requires_multipart: bool,
+    #[serde(rename = "rateLimit", default)]
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 // 简化的API配置结构
@@ -28,6 +38,8 @@ pub struct ApiConfig {
     pub endpoints: HashMap<String, EndpointConfig>,
     #[serde(rename = "port", default = "default_port")]
     pub port: u16,
+    #[serde(rename = "rateLimit", default)]
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 impl ApiConfig {

@@ -3,6 +3,7 @@ mod errors;
 mod handlers;
 mod http_client;
 mod models;
+mod rate_limit;
 
 use config::ApiConfig;
 use handlers::handle_request;
@@ -57,6 +58,7 @@ fn main() -> smol::io::Result<()> {
                     model_mapping: None,
                     endpoints: HashMap::new(),
                     port: 8000,
+                    rate_limit: None,
                 }
             }
         };
