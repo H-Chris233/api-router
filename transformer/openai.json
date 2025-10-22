@@ -6,6 +6,10 @@
     "User-Agent": "api-router/1.0",
     "Accept": "application/json"
   },
+  "rateLimit": {
+    "requestsPerMinute": 90,
+    "burst": 30
+  },
   "endpoints": {
     "/v1/chat/completions": {
       "headers": {

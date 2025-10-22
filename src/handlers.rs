@@ -2,8 +2,10 @@ use crate::config::{ApiConfig, EndpointConfig};
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest};
+use crate::rate_limit::{resolve_rate_limit_settings, RateLimitDecision, RATE_LIMITER};
 use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use log::{debug, warn};
+use serde_json::json;
 use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::env;
@@ -25,19 +27,33 @@ pub fn extract_content_length(headers: &str) -> Option<usize> {
 }
 
 pub fn build_error_response(status_code: u16, reason: &str, message: &str) -> String {
+    build_error_response_with_headers(status_code, reason, message, &[])
+}
+
+pub fn build_error_response_with_headers(
+    status_code: u16,
+    reason: &str,
+    message: &str,
+    extra_headers: &[(&str, String)],
+) -> String {
     let body = serde_json::json!({
         "error": {
             "message": message,
         }
     })
     .to_string();
-    format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+    let mut response = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
         status_code,
         reason,
-        body.len(),
-        body
-    )
+        body.len()
+    );
+    for (key, value) in extra_headers {
+        response.push_str(&format!("{}: {}\r\n", key, value));
+    }
+    response.push_str("\r\n");
+    response.push_str(&body);
+    response
 }
 
 pub fn map_error_to_response(err: &RouterError) -> String {
@@ -123,6 +139,44 @@ fn load_api_config() -> RouterResult<ApiConfig> {
 
 fn resolve_default_api_key() -> String {
     env::var("DEFAULT_API_KEY").unwrap_or_else(|_| DEFAULT_API_KEY_PLACEHOLDER.to_string())
+}
+
+fn parse_authorization_header(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let scheme = parts.next().unwrap_or("");
+    if scheme.eq_ignore_ascii_case("bearer") {
+        parts.next().map(|token| token.to_string())
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn extract_client_api_key(headers: &HashMap<String, String>, default_api_key: &str) -> String {
+    headers
+        .get("authorization")
+        .and_then(|raw| parse_authorization_header(raw))
+        .filter(|token| !token.is_empty())
+        .unwrap_or_else(|| default_api_key.to_string())
+}
+
+fn anonymize_key(key: &str) -> String {
+    if key.is_empty() {
+        return "unknown".to_string();
+    }
+    let prefix_len = key.len().min(4);
+    let suffix_len = key.len().saturating_sub(prefix_len).min(2);
+    let prefix = &key[..prefix_len];
+    let suffix = if suffix_len > 0 {
+        &key[key.len() - suffix_len..]
+    } else {
+        ""
+    };
+    format!("{}***{}", prefix, suffix)
 }
 
 fn normalized_base_url(base: &str) -> String {
@@ -378,8 +432,17 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
 
     match (parsed_request.method.as_str(), route_path) {
         ("GET", "/health") => {
-            let body = b"{\"status\": \"ok\", \"message\": \"Light API Router running\"}";
-            let _ = write_response(&mut stream, "application/json", body).await;
+            let snapshot = RATE_LIMITER.snapshot();
+            let body = json!({
+                "status": "ok",
+                "message": "Light API Router running",
+                "rateLimiter": {
+                    "activeBuckets": snapshot.active_buckets,
+                    "routes": snapshot.routes,
+                }
+            });
+            let payload = body.to_string();
+            let _ = write_response(&mut stream, "application/json", payload.as_bytes()).await;
         }
         ("GET", "/v1/models") => {
             let body = b"{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-plus\", \"object\": \"model\", \"created\": 1677610602, \"owned_by\": \"organization-owner\"}]}";
@@ -400,6 +463,31 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
                 }
             };
             let default_api_key = resolve_default_api_key();
+            let client_api_key = extract_client_api_key(&parsed_request.headers, &default_api_key);
+
+            if let Some(settings) = resolve_rate_limit_settings(route_path, &config) {
+                match RATE_LIMITER.check(route_path, &client_api_key, &settings) {
+                    RateLimitDecision::Allowed => {}
+                    RateLimitDecision::Limited {
+                        retry_after_seconds,
+                    } => {
+                        warn!(
+                            "Rate limit exceeded for route {} and client {}",
+                            route_path,
+                            anonymize_key(&client_api_key)
+                        );
+                        let response = build_error_response_with_headers(
+                            429,
+                            "TOO MANY REQUESTS",
+                            "Rate limit exceeded",
+                            &[("Retry-After", retry_after_seconds.to_string())],
+                        );
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        let _ = stream.flush().await;
+                        return;
+                    }
+                }
+            }
 
             let result = match route_path {
                 "/v1/chat/completions" => {
