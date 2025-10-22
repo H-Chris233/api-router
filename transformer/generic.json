@@ -6,6 +6,10 @@
     "User-Agent": "GenericAPI/1.0",
     "Accept": "application/json"
   },
+  "rateLimit": {
+    "requestsPerMinute": 60,
+    "burst": 20
+  },
   "endpoints": {
     "/v1/chat/completions": {
       "headers": {

@@ -11,6 +11,7 @@
 - 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
 - 自动处理音频转写/翻译请求的 multipart/form-data 载荷
 - 动态加载 transformer 目录中的 JSON 配置文件
+- 支持基于 API Key 与路由粒度的令牌桶限流，超限时返回 429 并暴露健康指标
 
 ## 安装与运行
 
@@ -60,6 +61,7 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 - 默认请求头 (`headers`)
 - 多端点独立设置（自定义上游路径/HTTP 方法、额外头部、流式与 multipart 支持）
 - 模型名称映射 (`modelMapping`)
+- 令牌桶限流策略（全局 `rateLimit` 与端点覆盖）
 - 自定义监听端口 (`port`)
 
 ### 配置示例
@@ -73,18 +75,30 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
     "User-Agent": "QwenCode/0.0.14 (linux; x64)",
     "Accept": "application/json"
   },
+  "rateLimit": {
+    "requestsPerMinute": 120,
+    "burst": 40
+  },
   "endpoints": {
     "/v1/chat/completions": {
       "headers": {
         "Accept": "application/json, text/event-stream"
       },
-      "streamSupport": true
+      "streamSupport": true,
+      "rateLimit": {
+        "requestsPerMinute": 60,
+        "burst": 25
+      }
     },
     "/v1/completions": {
       "headers": {
         "Accept": "application/json, text/event-stream"
       },
-      "streamSupport": true
+      "streamSupport": true,
+      "rateLimit": {
+        "requestsPerMinute": 60,
+        "burst": 25
+      }
     },
     "/v1/embeddings": {},
     "/v1/audio/transcriptions": {
@@ -104,11 +118,19 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 
 `endpoints` 字段允许针对不同路由覆盖上游 Header、转发路径 (`upstreamPath`)、HTTP 方法 (`method`)、是否支持流式转发以及是否需要特殊处理（如 multipart 音频上传）。
 
+
+#### 限流配置
+
+- `rateLimit` 支持通过配置文件为全局及单个端点设置 `requestsPerMinute` 与 `burst` 阈值。
+- 如果配置文件未提供，可通过环境变量 `RATE_LIMIT_REQUESTS_PER_MINUTE` 与 `RATE_LIMIT_BURST` 设置默认值。
+- 每个客户端 API Key 与路由组合分别维护令牌桶，超限时返回 `429 Too Many Requests`，并透出 `Retry-After` 头提示重试秒数。
+- `/health` 端点会返回当前活跃的令牌桶数量以及按路由分组的统计信息，便于监控限流状态。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| GET  | `/health` | 健康检查 |
+| GET  | `/health` | 健康检查（包含限流指标） |
 | GET  | `/v1/models` | 返回可用模型列表（示例数据） |
 | POST | `/v1/chat/completions` | Chat Completions 代理，支持流式 |
 | POST | `/v1/completions` | Text Completions 代理，支持流式 |
