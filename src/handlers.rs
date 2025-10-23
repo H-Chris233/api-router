@@ -572,6 +572,7 @@ async fn handle_chat_completions(
 
     let is_streaming = chat_request.stream.unwrap_or(false);
     if is_streaming {
+        let stream_config = endpoint.stream_config.as_ref().or(config.stream_config.as_ref());
         handle_streaming_request(
             stream,
             &base_url,
@@ -579,6 +580,7 @@ async fn handle_chat_completions(
             &upstream_path,
             &headers,
             &body_bytes,
+            stream_config,
         )
         .await?
     } else {
@@ -621,6 +623,7 @@ async fn handle_completions(
 
     let is_streaming = completion_request.stream.unwrap_or(false);
     if is_streaming {
+        let stream_config = endpoint.stream_config.as_ref().or(config.stream_config.as_ref());
         handle_streaming_request(
             stream,
             &base_url,
@@ -628,6 +631,7 @@ async fn handle_completions(
             &upstream_path,
             &headers,
             &body_bytes,
+            stream_config,
         )
         .await?
     } else {

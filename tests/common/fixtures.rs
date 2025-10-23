@@ -22,6 +22,10 @@ impl ConfigFixture {
         Self { value }
     }
 
+    pub fn from_value(value: Value) -> Self {
+        Self { value }
+    }
+
     pub fn with_base_url(mut self, base_url: &str) -> Self {
         self.value["baseUrl"] = json!(base_url);
         self

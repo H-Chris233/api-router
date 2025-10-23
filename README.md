@@ -5,7 +5,12 @@
 ## 功能特性
 
 - 将非标准 API 请求转换为 OpenAI 兼容格式
-- 支持流式传输（SSE）转发
+- **高性能流式传输（SSE）**：
+  - 增量读写，避免积累整个响应
+  - 支持反压机制（backpressure）
+  - 可配置的缓冲区大小
+  - 心跳保活（heartbeat keep-alive）
+  - 客户端断连时优雅关闭
 - 自动处理认证头、User-Agent 以及基础请求头
 - 支持模型名称映射（client model ➜ provider model）
 - 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
@@ -150,6 +155,34 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 ```
 
 `endpoints` 字段允许针对不同路由覆盖上游 Header、转发路径 (`upstreamPath`)、HTTP 方法 (`method`)、是否支持流式转发以及是否需要特殊处理（如 multipart 音频上传）。
+
+#### 流式传输配置
+
+API Router 支持配置流式传输的缓冲区大小和心跳间隔，可在全局或端点级别配置：
+
+```json
+{
+  "baseUrl": "https://api.example.com",
+  "streamConfig": {
+    "bufferSize": 8192,
+    "heartbeatIntervalSecs": 30
+  },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "streamSupport": true,
+      "streamConfig": {
+        "bufferSize": 4096,
+        "heartbeatIntervalSecs": 15
+      }
+    }
+  }
+}
+```
+
+- `bufferSize`：流式传输的缓冲区大小（字节），默认 8192（8 KB）
+- `heartbeatIntervalSecs`：心跳间隔（秒），默认 30 秒。在上游响应慢时发送心跳保持连接
+
+详细的流式传输文档请参阅 [STREAMING.md](STREAMING.md)。
 
 
 #### 限流配置
