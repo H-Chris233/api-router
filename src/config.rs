@@ -298,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn load_api_config_uses_cache_until_file_changes() {
         reset_cache();
         let path = temp_config_path("cache-hit");
@@ -322,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn load_api_config_falls_back_when_primary_missing() {
         reset_cache();
         std::env::set_var("API_ROUTER_CONFIG_PATH", "./does-not-exist.json");
@@ -335,6 +337,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn load_api_config_propagates_parse_errors() {
         reset_cache();
         let path = temp_config_path("invalid");

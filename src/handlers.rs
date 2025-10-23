@@ -286,24 +286,27 @@ type MockHttpHandler = Box<
 >;
 
 #[cfg(test)]
-static HTTP_CLIENT_OVERRIDE: OnceLock<Mutex<Option<MockHttpHandler>>> = OnceLock::new();
+static HTTP_CLIENT_OVERRIDE: OnceLock<std::sync::RwLock<Option<MockHttpHandler>>> = OnceLock::new();
 
 #[cfg(test)]
 fn with_mock_http_client<F, R>(mock: MockHttpHandler, f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let cell = HTTP_CLIENT_OVERRIDE.get_or_init(|| Mutex::new(None));
+    let cell = HTTP_CLIENT_OVERRIDE.get_or_init(|| std::sync::RwLock::new(None));
     {
-        let mut guard = cell.lock().unwrap();
+        let mut guard = cell.write().unwrap();
         *guard = Some(mock);
     }
-    let result = f();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
     {
-        let mut guard = cell.lock().unwrap();
+        let mut guard = cell.write().unwrap();
         *guard = None;
     }
-    result
+    match result {
+        Ok(r) => r,
+        Err(e) => std::panic::resume_unwind(e),
+    }
 }
 
 fn map_model_name(config: &ApiConfig, model: &str) -> String {
@@ -363,7 +366,7 @@ async fn forward_to_upstream(
     #[cfg(test)]
     {
         if let Some(lock) = HTTP_CLIENT_OVERRIDE.get() {
-            if let Some(ref handler) = *lock.lock().unwrap() {
+            if let Some(ref handler) = *lock.read().unwrap() {
                 return (handler)(url, method, headers, body);
             }
         }
@@ -763,6 +766,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn chat_completions_respects_endpoint_overrides() {
         let expected_body = b"{\"id\":\"anthropic\"}".to_vec();
         let send_called = Arc::new(Mutex::new(false));
@@ -849,6 +853,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn embeddings_route_forwards_with_mocked_upstream() {
         let expected_body = b"{\"ok\":true}".to_vec();
         let send_called = Arc::new(Mutex::new(false));
@@ -927,6 +932,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn audio_route_rewrites_model_and_forwards() {
         let expected_body = b"{\"text\":\"hi\"}".to_vec();
         let send_called = Arc::new(Mutex::new(false));
