@@ -3,7 +3,7 @@ use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest};
 use crate::rate_limit::{resolve_rate_limit_settings, RateLimitDecision, RATE_LIMITER};
-use futures_lite::{AsyncReadExt, AsyncWriteExt};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use log::{debug, warn};
 use serde_json::json;
 use smol::net::TcpStream;
@@ -741,7 +741,7 @@ async fn handle_audio(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_lite::AsyncReadExt;
+    use smol::io::AsyncReadExt;
     use serde_json::json;
     use smol::net::TcpListener;
     use std::collections::HashMap;
