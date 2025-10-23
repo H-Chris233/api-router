@@ -1,6 +1,6 @@
 use crate::errors::{RouterError, RouterResult};
 use async_tls::TlsConnector;
-use futures_lite::{AsyncReadExt, AsyncWriteExt};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use log::debug;
 use smol::net::TcpStream;
 use std::collections::HashMap;

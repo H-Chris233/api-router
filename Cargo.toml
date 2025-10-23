@@ -5,12 +5,9 @@ edition = "2021"
 
 [dependencies]
 smol = "2"
-async-channel = "2"
-futures-lite = "2"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-bytes = "1.0"
-url = "2.0"
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+url = { version = "2.0", default-features = false }
 async-tls = "0.12"
 rustls = "0.20"
 webpki-roots = "0.22"
