@@ -24,6 +24,7 @@ fn default_config() -> ApiConfig {
         endpoints: HashMap::new(),
         port: 8000,
         rate_limit: None,
+        stream_config: None,
     }
 }
 

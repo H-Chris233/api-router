@@ -40,6 +40,22 @@ pub struct RateLimitConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct StreamConfig {
+    #[serde(rename = "bufferSize", default = "default_buffer_size")]
+    pub buffer_size: usize,
+    #[serde(rename = "heartbeatIntervalSecs", default = "default_heartbeat_interval")]
+    pub heartbeat_interval_secs: u64,
+}
+
+fn default_buffer_size() -> usize {
+    8192
+}
+
+fn default_heartbeat_interval() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct EndpointConfig {
     #[serde(rename = "upstreamPath")]
     pub upstream_path: Option<String>,
@@ -53,6 +69,8 @@ pub struct EndpointConfig {
     pub requires_multipart: bool,
     #[serde(rename = "rateLimit", default)]
     pub rate_limit: Option<RateLimitConfig>,
+    #[serde(rename = "streamConfig", default)]
+    pub stream_config: Option<StreamConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +87,8 @@ pub struct ApiConfig {
     pub port: u16,
     #[serde(rename = "rateLimit", default)]
     pub rate_limit: Option<RateLimitConfig>,
+    #[serde(rename = "streamConfig", default)]
+    pub stream_config: Option<StreamConfig>,
 }
 
 impl ApiConfig {

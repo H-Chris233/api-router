@@ -1,9 +1,11 @@
 use crate::errors::{RouterError, RouterResult};
+use crate::config::StreamConfig;
 use async_tls::TlsConnector;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use log::debug;
+use log::{debug, warn};
 use smol::net::TcpStream;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use url::Url;
 
 fn build_request_bytes(
@@ -127,7 +129,13 @@ pub async fn handle_streaming_request(
     path: &str,
     headers: &HashMap<String, String>,
     body: &[u8],
+    stream_config: Option<&StreamConfig>,
 ) -> RouterResult<()> {
+    let buffer_size = stream_config.map(|c| c.buffer_size).unwrap_or(8192);
+    let heartbeat_interval = stream_config
+        .map(|c| Duration::from_secs(c.heartbeat_interval_secs))
+        .unwrap_or(Duration::from_secs(30));
+
     let parsed_url = Url::parse(url).map_err(|e| RouterError::Url(e.to_string()))?;
     let host = parsed_url
         .host_str()
@@ -141,7 +149,7 @@ pub async fn handle_streaming_request(
         });
 
     let request_bytes = build_request_bytes(method, path, host, headers, Some(body));
-    let mut tcp_stream = TcpStream::connect((host, port)).await?;
+    let tcp_stream = TcpStream::connect((host, port)).await?;
 
     if parsed_url.scheme() == "https" {
         let tls_connector = TlsConnector::new();
@@ -155,31 +163,128 @@ pub async fn handle_streaming_request(
 
         let response_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
         client_stream.write_all(response_headers.as_bytes()).await?;
+        client_stream.flush().await?;
 
-        let mut buffer = [0; 4096];
-        loop {
-            let n = tls_stream.read(&mut buffer).await?;
-            if n == 0 {
-                break;
-            }
-            client_stream.write_all(&buffer[..n]).await?;
-            client_stream.flush().await?;
-        }
+        stream_with_backpressure_and_heartbeat(
+            &mut tls_stream,
+            client_stream,
+            buffer_size,
+            heartbeat_interval,
+        )
+        .await
     } else {
+        let mut tcp_stream = tcp_stream;
         tcp_stream.write_all(&request_bytes).await?;
         tcp_stream.flush().await?;
 
         let response_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
         client_stream.write_all(response_headers.as_bytes()).await?;
+        client_stream.flush().await?;
 
-        let mut buffer = [0; 4096];
-        loop {
-            let n = tcp_stream.read(&mut buffer).await?;
-            if n == 0 {
+        stream_with_backpressure_and_heartbeat(
+            &mut tcp_stream,
+            client_stream,
+            buffer_size,
+            heartbeat_interval,
+        )
+        .await
+    }
+}
+
+async fn stream_with_backpressure_and_heartbeat<R, W>(
+    upstream: &mut R,
+    client: &mut W,
+    buffer_size: usize,
+    heartbeat_interval: Duration,
+) -> RouterResult<()>
+where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    let mut buffer = vec![0u8; buffer_size];
+    let mut last_activity = Instant::now();
+    let heartbeat_msg = b": heartbeat\n\n";
+
+    loop {
+        let timeout_duration = heartbeat_interval
+            .checked_sub(last_activity.elapsed())
+            .unwrap_or(Duration::from_millis(100));
+
+        let read_result = smol::future::or(
+            async {
+                match upstream.read(&mut buffer).await {
+                    Ok(n) => Some(Ok(n)),
+                    Err(e) => Some(Err(e)),
+                }
+            },
+            async {
+                smol::Timer::after(timeout_duration).await;
+                None
+            },
+        )
+        .await;
+
+        match read_result {
+            Some(Ok(0)) => {
+                debug!("Upstream closed connection, finishing stream");
                 break;
             }
-            client_stream.write_all(&buffer[..n]).await?;
-            client_stream.flush().await?;
+            Some(Ok(n)) => {
+                if let Err(e) = client.write_all(&buffer[..n]).await {
+                    if e.kind() == std::io::ErrorKind::BrokenPipe
+                        || e.kind() == std::io::ErrorKind::ConnectionReset
+                    {
+                        warn!("Client disconnected during streaming, stopping gracefully");
+                        return Ok(());
+                    }
+                    return Err(e.into());
+                }
+
+                if let Err(e) = client.flush().await {
+                    if e.kind() == std::io::ErrorKind::BrokenPipe
+                        || e.kind() == std::io::ErrorKind::ConnectionReset
+                    {
+                        warn!("Client disconnected during flush, stopping gracefully");
+                        return Ok(());
+                    }
+                    return Err(e.into());
+                }
+
+                last_activity = Instant::now();
+            }
+            Some(Err(e)) => {
+                if e.kind() == std::io::ErrorKind::ConnectionReset
+                    || e.kind() == std::io::ErrorKind::BrokenPipe
+                {
+                    warn!("Upstream connection lost during streaming");
+                    return Ok(());
+                }
+                return Err(e.into());
+            }
+            None => {
+                if last_activity.elapsed() >= heartbeat_interval {
+                    debug!("Sending heartbeat to keep connection alive");
+                    if let Err(e) = client.write_all(heartbeat_msg).await {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe
+                            || e.kind() == std::io::ErrorKind::ConnectionReset
+                        {
+                            warn!("Client disconnected while sending heartbeat");
+                            return Ok(());
+                        }
+                        return Err(e.into());
+                    }
+                    if let Err(e) = client.flush().await {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe
+                            || e.kind() == std::io::ErrorKind::ConnectionReset
+                        {
+                            warn!("Client disconnected during heartbeat flush");
+                            return Ok(());
+                        }
+                        return Err(e.into());
+                    }
+                    last_activity = Instant::now();
+                }
+            }
         }
     }
 
