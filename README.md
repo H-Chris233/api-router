@@ -159,6 +159,13 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 - 每个客户端 API Key 与路由组合分别维护令牌桶，超限时返回 `429 Too Many Requests`，并透出 `Retry-After` 头提示重试秒数。
 - `/health` 端点会返回当前活跃的令牌桶数量以及按路由分组的统计信息，便于监控限流状态。
 
+#### 配置缓存与热加载
+
+- 配置文件通过 `OnceLock + RwLock` 缓存，首次请求后会常驻内存，避免重复 I/O 与 JSON 解析开销。
+- 每次获取配置时都会检查目标文件的修改时间，只要检测到变更就会自动重新读取并刷新缓存，无需重启进程。
+- 通过修改或执行 `touch transformer/<name>.json` 即可触发热加载；在自定义目录下的配置同样适用。
+- 设置环境变量 `API_ROUTER_CONFIG_PATH=/path/to/config.json` 可以将配置文件移动到 `transformer/` 目录之外，便于挂载外部卷或在测试中使用临时文件。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |
