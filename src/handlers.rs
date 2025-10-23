@@ -1,4 +1,4 @@
-use crate::config::{ApiConfig, EndpointConfig};
+use crate::config::{load_api_config, ApiConfig, EndpointConfig};
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest};
@@ -9,7 +9,6 @@ use serde_json::json;
 use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::env;
-use std::fs;
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 
@@ -115,26 +114,6 @@ fn parse_http_request(request_bytes: &[u8]) -> RouterResult<ParsedRequest> {
         headers,
         body,
     })
-}
-
-fn load_api_config() -> RouterResult<ApiConfig> {
-    let args: Vec<String> = env::args().collect();
-    let config_basename = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        "qwen".to_string()
-    };
-    let config_file = format!("./transformer/{}.json", config_basename);
-    let config_content = fs::read_to_string(&config_file).or_else(|e| {
-        warn!(
-            "Failed to read config {}: {}. Falling back to transformer/qwen.json",
-            config_file, e
-        );
-        fs::read_to_string("./transformer/qwen.json")
-            .map_err(|e2| RouterError::ConfigRead(e2.to_string()))
-    })?;
-
-    serde_json::from_str(&config_content).map_err(|e| RouterError::ConfigParse(e.to_string()))
 }
 
 fn resolve_default_api_key() -> String {
@@ -493,10 +472,11 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
                     return;
                 }
             };
+            let config_ref = config.as_ref();
             let default_api_key = resolve_default_api_key();
             let client_api_key = extract_client_api_key(&parsed_request.headers, &default_api_key);
 
-            if let Some(settings) = resolve_rate_limit_settings(route_path, &config) {
+            if let Some(settings) = resolve_rate_limit_settings(route_path, config_ref) {
                 match RATE_LIMITER.check(route_path, &client_api_key, &settings) {
                     RateLimitDecision::Allowed => {}
                     RateLimitDecision::Limited {
@@ -522,21 +502,21 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
 
             let result = match route_path {
                 "/v1/chat/completions" => {
-                    handle_chat_completions(&parsed_request, &mut stream, &config, &default_api_key)
+                    handle_chat_completions(&parsed_request, &mut stream, config_ref, &default_api_key)
                         .await
                 }
                 "/v1/completions" => {
-                    handle_completions(&parsed_request, &mut stream, &config, &default_api_key)
+                    handle_completions(&parsed_request, &mut stream, config_ref, &default_api_key)
                         .await
                 }
                 "/v1/embeddings" => {
-                    handle_embeddings(&parsed_request, &mut stream, &config, &default_api_key).await
+                    handle_embeddings(&parsed_request, &mut stream, config_ref, &default_api_key).await
                 }
                 "/v1/audio/transcriptions" | "/v1/audio/translations" => {
                     handle_audio(
                         &parsed_request,
                         &mut stream,
-                        &config,
+                        config_ref,
                         &default_api_key,
                         route_path,
                     )
