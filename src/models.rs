@@ -160,3 +160,56 @@ pub struct AudioTranscriptionResponse {
 }
 
 pub type AudioTranslationResponse = AudioTranscriptionResponse;
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct AnthropicMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct AnthropicMessagesRequest {
+    pub model: String,
+    pub messages: Vec<AnthropicMessage>,
+    pub max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AnthropicContentBlock {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AnthropicUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AnthropicMessagesResponse {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub response_type: String,
+    pub role: String,
+    pub content: Vec<AnthropicContentBlock>,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequence: Option<String>,
+    pub usage: AnthropicUsage,
+}

@@ -14,6 +14,7 @@
 - 自动处理认证头、User-Agent 以及基础请求头
 - 支持模型名称映射（client model ➜ provider model）
 - 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
+- **支持 Anthropic Messages API（`/v1/messages`）**：原生支持 Anthropic 风格的请求格式，包括 system 提示、max_tokens 参数以及流式响应
 - 自动处理音频转写/翻译请求的 multipart/form-data 载荷
 - 动态加载 transformer 目录中的 JSON 配置文件
 - 支持基于 API Key 与路由粒度的令牌桶限流，超限时返回 429 并暴露健康指标
@@ -210,6 +211,7 @@ API Router 支持配置流式传输的缓冲区大小和心跳间隔，可在全
 | POST | `/v1/embeddings` | Embeddings 代理 |
 | POST | `/v1/audio/transcriptions` | 音频转写代理（multipart/form-data） |
 | POST | `/v1/audio/translations` | 音频翻译代理（multipart/form-data） |
+| POST | `/v1/messages` | Anthropic Messages API 代理，支持流式 |
 
 ## 使用示例
 
@@ -283,6 +285,55 @@ curl -X POST http://localhost:8000/v1/audio/translations \
   -F "file=@sample.wav" \
   -F "model=whisper-1" \
   -F "prompt=Translate this recording"
+```
+
+### Anthropic Messages API（非流式）
+```bash
+curl -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-5-sonnet-20240620",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ]
+  }'
+```
+
+### Anthropic Messages API（带系统提示）
+```bash
+curl -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-haiku-20240307",
+    "max_tokens": 512,
+    "system": "你是一个友好的 Rust 编程助手。",
+    "messages": [
+      {"role": "user", "content": "什么是 async/await？"}
+    ],
+    "temperature": 0.7
+  }'
+```
+
+### Anthropic Messages API（流式）
+```bash
+curl -N -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "model": "claude-3-5-sonnet-20240620",
+    "max_tokens": 100,
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "数到5"}
+    ]
+  }'
 ```
 
 ## 开发指南：Handlers 模块

@@ -88,7 +88,8 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
         | ("POST", "/v1/completions")
         | ("POST", "/v1/embeddings")
         | ("POST", "/v1/audio/transcriptions")
-        | ("POST", "/v1/audio/translations") => {
+        | ("POST", "/v1/audio/translations")
+        | ("POST", "/v1/messages") => {
             let config = match load_api_config() {
                 Ok(cfg) => cfg,
                 Err(err) => {

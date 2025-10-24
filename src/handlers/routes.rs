@@ -1,7 +1,7 @@
 use crate::config::ApiConfig;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
-use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest};
+use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use smol::net::TcpStream;
@@ -58,6 +58,18 @@ pub(super) async fn handle_route(
         }
         "/v1/audio/transcriptions" | "/v1/audio/translations" => {
             forward_multipart_route(route_path, request, stream, config, default_api_key).await
+        }
+        "/v1/messages" => {
+            forward_json_route::<AnthropicMessagesRequest>(
+                route_path,
+                request,
+                stream,
+                config,
+                default_api_key,
+                adjust_anthropic_request,
+                Some(anthropic_should_stream),
+            )
+            .await
         }
         _ => Err(RouterError::BadRequest("Unsupported route".to_string())),
     }
@@ -168,6 +180,14 @@ fn chat_should_stream(payload: &ChatCompletionRequest) -> bool {
 }
 
 fn completion_should_stream(payload: &CompletionRequest) -> bool {
+    payload.stream.unwrap_or(false)
+}
+
+fn adjust_anthropic_request(config: &ApiConfig, payload: &mut AnthropicMessagesRequest) {
+    payload.model = map_model_name(config, &payload.model);
+}
+
+fn anthropic_should_stream(payload: &AnthropicMessagesRequest) -> bool {
     payload.stream.unwrap_or(false)
 }
 

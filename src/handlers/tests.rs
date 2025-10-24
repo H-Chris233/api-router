@@ -3,7 +3,7 @@ use super::plan::compute_upstream_path;
 use super::response::build_error_response_with_headers;
 use super::routes::{handle_route, with_mock_http_client};
 use crate::config::{ApiConfig, EndpointConfig};
-use crate::models::{ChatCompletionRequest, EmbeddingRequest};
+use crate::models::{ChatCompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
 use serde_json::json;
 use serial_test::serial;
 use smol::io::AsyncReadExt;
@@ -320,5 +320,162 @@ fn audio_route_rewrites_model_and_forwards() {
 
     let response = String::from_utf8(response_bytes).unwrap();
     assert!(response.contains("\"text\":\"hi\""));
+    assert!(*send_called.lock().unwrap());
+}
+
+#[test]
+#[serial]
+fn anthropic_messages_route_forwards_with_model_mapping() {
+    let expected_body = b"{\"id\":\"msg_123\",\"type\":\"message\"}".to_vec();
+    let send_called = Arc::new(Mutex::new(false));
+    let send_called_clone = Arc::clone(&send_called);
+
+    let response_bytes = with_mock_http_client(
+        Box::new(move |url, method, headers, body| {
+            *send_called_clone.lock().unwrap() = true;
+            assert_eq!(url, "https://api.anthropic.com/v1/messages");
+            assert_eq!(method, "POST");
+            assert_eq!(headers.get("Content-Type"), Some(&"application/json".to_string()));
+            assert_eq!(headers.get("anthropic-version"), Some(&"2023-06-01".to_string()));
+            let payload: AnthropicMessagesRequest = serde_json::from_slice(body.expect("body")).unwrap();
+            assert_eq!(payload.model, "claude-3-5-sonnet-20240620");
+            assert_eq!(payload.max_tokens, 100);
+            assert_eq!(payload.messages.len(), 1);
+            assert_eq!(payload.messages[0].role, "user");
+            Ok(expected_body.clone())
+        }),
+        || {
+            smol::block_on(async {
+                let config: ApiConfig = serde_json::from_str(
+                    r#"{
+                        "baseUrl": "https://api.anthropic.com",
+                        "headers": {
+                            "anthropic-version": "2023-06-01"
+                        },
+                        "modelMapping": {"gpt-4o-mini": "claude-3-5-sonnet-20240620"},
+                        "endpoints": {
+                            "/v1/messages": {
+                                "streamSupport": true
+                            }
+                        },
+                        "port": 8000
+                    }"#,
+                )
+                .unwrap();
+
+                let body = serde_json::json!({
+                    "model": "gpt-4o-mini",
+                    "max_tokens": 100,
+                    "messages": [
+                        {"role": "user", "content": "Hello"}
+                    ]
+                });
+                let mut headers = HashMap::new();
+                headers.insert("authorization".to_string(), "Bearer sk-ant-test-key".to_string());
+                headers.insert("content-type".to_string(), "application/json".to_string());
+
+                let parsed_request = ParsedRequest::new_for_tests(
+                    "POST",
+                    "/v1/messages",
+                    "HTTP/1.1",
+                    headers,
+                    serde_json::to_vec(&body).unwrap(),
+                );
+
+                let (mut server_stream, mut client_stream) = tcp_pair().await.unwrap();
+                handle_route(
+                    "/v1/messages",
+                    &parsed_request,
+                    &mut server_stream,
+                    &config,
+                    "default-key",
+                )
+                .await
+                .unwrap();
+                drop(server_stream);
+
+                let mut buf = vec![0u8; 512];
+                let n = client_stream.read(&mut buf).await.unwrap();
+                buf.truncate(n);
+                buf
+            })
+        },
+    );
+
+    let response = String::from_utf8(response_bytes).unwrap();
+    assert!(response.contains("\"id\":\"msg_123\""));
+    assert!(*send_called.lock().unwrap());
+}
+
+#[test]
+#[serial]
+fn anthropic_messages_route_with_system_message() {
+    let expected_body = b"{\"id\":\"msg_456\"}".to_vec();
+    let send_called = Arc::new(Mutex::new(false));
+    let send_called_clone = Arc::clone(&send_called);
+
+    let response_bytes = with_mock_http_client(
+        Box::new(move |url, method, _headers, body| {
+            *send_called_clone.lock().unwrap() = true;
+            assert_eq!(url, "https://api.anthropic.com/v1/messages");
+            assert_eq!(method, "POST");
+            let payload: AnthropicMessagesRequest = serde_json::from_slice(body.expect("body")).unwrap();
+            assert_eq!(payload.model, "claude-3-haiku-20240307");
+            assert_eq!(payload.system, Some("You are a helpful assistant.".to_string()));
+            Ok(expected_body.clone())
+        }),
+        || {
+            smol::block_on(async {
+                let config: ApiConfig = serde_json::from_str(
+                    r#"{
+                        "baseUrl": "https://api.anthropic.com",
+                        "headers": {},
+                        "endpoints": {"/v1/messages": {}},
+                        "port": 8000
+                    }"#,
+                )
+                .unwrap();
+
+                let body = serde_json::json!({
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": 50,
+                    "system": "You are a helpful assistant.",
+                    "messages": [
+                        {"role": "user", "content": "Hi"}
+                    ]
+                });
+                let mut headers = HashMap::new();
+                headers.insert("content-type".to_string(), "application/json".to_string());
+
+                let parsed_request = ParsedRequest::new_for_tests(
+                    "POST",
+                    "/v1/messages",
+                    "HTTP/1.1",
+                    headers,
+                    serde_json::to_vec(&body).unwrap(),
+                );
+
+                let (mut server_stream, mut client_stream) = tcp_pair().await.unwrap();
+                handle_route(
+                    "/v1/messages",
+                    &parsed_request,
+                    &mut server_stream,
+                    &config,
+                    "test-key",
+                )
+                .await
+                .unwrap();
+                drop(server_stream);
+
+                let mut buf = vec![0u8; 512];
+                let n = client_stream.read(&mut buf).await.unwrap();
+                buf.truncate(n);
+                buf
+            })
+        },
+    );
+
+    let response = String::from_utf8(response_bytes).unwrap();
+    assert!(response.contains("\"id\":\"msg_456\""));
     assert!(*send_called.lock().unwrap());
 }
