@@ -204,12 +204,31 @@ API Router 支持配置流式传输的缓冲区大小和心跳间隔，可在全
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
 | GET  | `/health` | 健康检查（包含限流指标） |
+| GET  | `/metrics` | Prometheus 指标导出 |
 | GET  | `/v1/models` | 返回可用模型列表（示例数据） |
 | POST | `/v1/chat/completions` | Chat Completions 代理，支持流式 |
 | POST | `/v1/completions` | Text Completions 代理，支持流式 |
 | POST | `/v1/embeddings` | Embeddings 代理 |
 | POST | `/v1/audio/transcriptions` | 音频转写代理（multipart/form-data） |
 | POST | `/v1/audio/translations` | 音频翻译代理（multipart/form-data） |
+
+## 监控与指标
+
+服务通过 `/metrics` 端点暴露 Prometheus 0.0.4 文本格式的运行指标，可直接被监控系统抓取：
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+### 指标说明
+
+- `requests_total{method,route,status}`：请求计数器，`status` 标签包含 `ok`、`rate_limited`、`bad_request`、`upstream_error`、`config_error`、`internal_error` 与 `not_found` 等分类。
+- `request_latency_seconds{method,route}`：请求延迟直方图，包含 `*_bucket`、`*_sum` 与 `*_count` 序列，默认以 5ms 起步的指数分桶覆盖常见延迟区间。
+- `upstream_errors_total{route}`：在转发至上游时发生的错误计数。
+- `active_connections`：当前正在处理的 TCP 连接数量（Gauge），用于观察连接压力。
+- `cache_hits`：配置缓存命中次数（Gauge），帮助评估配置热加载命中情况。
+
+这些指标可与 `/health` 端点提供的限流快照结合，构建完整的服务健康度监控面板。
 
 ## 使用示例
 

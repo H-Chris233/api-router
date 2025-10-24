@@ -1,11 +1,12 @@
 use crate::config::{load_api_config, ApiConfig, EndpointConfig};
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
+use crate::metrics::{self, RequestMetricsGuard, RequestStatus};
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest};
 use crate::rate_limit::{resolve_rate_limit_settings, RateLimitDecision, RATE_LIMITER};
-use smol::io::{AsyncReadExt, AsyncWriteExt};
 use log::{debug, warn};
 use serde_json::json;
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::env;
@@ -395,6 +396,8 @@ async fn write_response(
 pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
     debug!("New connection from {}", addr);
 
+    let _connection_guard = metrics::track_connection();
+
     let mut request_bytes = Vec::new();
     let mut buffer = [0; 4096];
 
@@ -437,11 +440,14 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
         }
     };
 
-    let route_path = parsed_request
+    let route_path_string = parsed_request
         .target
         .split('?')
         .next()
-        .unwrap_or(parsed_request.target.as_str());
+        .unwrap_or(parsed_request.target.as_str())
+        .to_string();
+    let mut tracker = RequestMetricsGuard::new(parsed_request.method.as_str(), &route_path_string);
+    let route_path = route_path_string.as_str();
 
     match (parsed_request.method.as_str(), route_path) {
         ("GET", "/health") => {
@@ -469,6 +475,7 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
             let config = match load_api_config() {
                 Ok(cfg) => cfg,
                 Err(err) => {
+                    tracker.set_status(RequestStatus::ConfigError);
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(response.as_bytes()).await;
                     let _ = stream.flush().await;
@@ -485,6 +492,7 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
                     RateLimitDecision::Limited {
                         retry_after_seconds,
                     } => {
+                        tracker.set_status(RequestStatus::RateLimited);
                         warn!(
                             "Rate limit exceeded for route {} and client {}",
                             route_path,
@@ -505,15 +513,21 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
 
             let result = match route_path {
                 "/v1/chat/completions" => {
-                    handle_chat_completions(&parsed_request, &mut stream, config_ref, &default_api_key)
-                        .await
+                    handle_chat_completions(
+                        &parsed_request,
+                        &mut stream,
+                        config_ref,
+                        &default_api_key,
+                    )
+                    .await
                 }
                 "/v1/completions" => {
                     handle_completions(&parsed_request, &mut stream, config_ref, &default_api_key)
                         .await
                 }
                 "/v1/embeddings" => {
-                    handle_embeddings(&parsed_request, &mut stream, config_ref, &default_api_key).await
+                    handle_embeddings(&parsed_request, &mut stream, config_ref, &default_api_key)
+                        .await
                 }
                 "/v1/audio/transcriptions" | "/v1/audio/translations" => {
                     handle_audio(
@@ -529,12 +543,46 @@ pub async fn handle_request(mut stream: TcpStream, addr: std::net::SocketAddr) {
             };
 
             if let Err(err) = result {
+                match &err {
+                    RouterError::BadRequest(_) | RouterError::Json(_) => {
+                        tracker.set_status(RequestStatus::BadRequest);
+                    }
+                    RouterError::Upstream(_) | RouterError::Tls(_) => {
+                        tracker.set_status(RequestStatus::UpstreamError);
+                        metrics::record_upstream_error(route_path);
+                    }
+                    RouterError::ConfigRead(_) | RouterError::ConfigParse(_) => {
+                        tracker.set_status(RequestStatus::ConfigError);
+                    }
+                    RouterError::Io(_) | RouterError::Url(_) => {
+                        tracker.set_status(RequestStatus::InternalError);
+                    }
+                }
                 let response = map_error_to_response(&err);
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.flush().await;
             }
         }
+        ("GET", "/metrics") => match metrics::render() {
+            Ok(payload) => {
+                if let Err(err) =
+                    write_response(&mut stream, "text/plain; version=0.0.4", &payload).await
+                {
+                    tracker.set_status(RequestStatus::InternalError);
+                    warn!("Failed to send metrics response: {}", err);
+                }
+            }
+            Err(err) => {
+                tracker.set_status(RequestStatus::InternalError);
+                warn!("Failed to encode metrics: {}", err);
+                let response =
+                    build_error_response(500, "INTERNAL SERVER ERROR", "Metrics export failed");
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
+            }
+        },
         _ => {
+            tracker.set_status(RequestStatus::NotFound);
             let response = "HTTP/1.1 404 NOT FOUND\r\nContent-Length: 9\r\n\r\nNot Found";
             let _ = stream.write_all(response.as_bytes()).await;
             let _ = stream.flush().await;
@@ -572,7 +620,10 @@ async fn handle_chat_completions(
 
     let is_streaming = chat_request.stream.unwrap_or(false);
     if is_streaming {
-        let stream_config = endpoint.stream_config.as_ref().or(config.stream_config.as_ref());
+        let stream_config = endpoint
+            .stream_config
+            .as_ref()
+            .or(config.stream_config.as_ref());
         handle_streaming_request(
             stream,
             &base_url,
@@ -623,7 +674,10 @@ async fn handle_completions(
 
     let is_streaming = completion_request.stream.unwrap_or(false);
     if is_streaming {
-        let stream_config = endpoint.stream_config.as_ref().or(config.stream_config.as_ref());
+        let stream_config = endpoint
+            .stream_config
+            .as_ref()
+            .or(config.stream_config.as_ref());
         handle_streaming_request(
             stream,
             &base_url,
@@ -728,8 +782,8 @@ async fn handle_audio(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smol::io::AsyncReadExt;
     use serde_json::json;
+    use smol::io::AsyncReadExt;
     use smol::net::TcpListener;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -781,10 +835,7 @@ mod tests {
                 *send_called_clone.lock().unwrap() = true;
                 assert_eq!(url, "https://api.override/v1/messages?mode=test");
                 assert_eq!(method, "PATCH");
-                assert_eq!(
-                    headers.get("Accept"),
-                    Some(&"application/json".to_string())
-                );
+                assert_eq!(headers.get("Accept"), Some(&"application/json".to_string()));
                 let payload: ChatCompletionRequest =
                     serde_json::from_slice(body.expect("body")).unwrap();
                 assert_eq!(payload.model, "claude-3-haiku");
@@ -815,14 +866,8 @@ mod tests {
                         ]
                     });
                     let mut headers = HashMap::new();
-                    headers.insert(
-                        "authorization".to_string(),
-                        "Bearer client-key".to_string(),
-                    );
-                    headers.insert(
-                        "content-type".to_string(),
-                        "application/json".to_string(),
-                    );
+                    headers.insert("authorization".to_string(), "Bearer client-key".to_string());
+                    headers.insert("content-type".to_string(), "application/json".to_string());
 
                     let parsed_request = ParsedRequest {
                         method: "POST".to_string(),

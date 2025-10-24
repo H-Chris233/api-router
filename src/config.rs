@@ -1,4 +1,5 @@
 use crate::errors::{RouterError, RouterResult};
+use crate::metrics;
 use log::{debug, warn};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -214,6 +215,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
                     "using cached API config from {}",
                     entry.source.display()
                 );
+                metrics::record_cache_hit();
                 return Ok(entry.config.clone());
             }
         }
@@ -226,6 +228,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
                 "using cached API config from {}",
                 entry.source.display()
             );
+            metrics::record_cache_hit();
             return Ok(entry.config.clone());
         }
     }

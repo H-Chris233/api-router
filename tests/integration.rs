@@ -45,7 +45,10 @@ fn forwards_chat_completion_payload_with_model_mapping() {
         router_port,
         "POST",
         "/v1/chat/completions",
-        &[("Authorization", client_key), ("Content-Type", "application/json")],
+        &[
+            ("Authorization", client_key),
+            ("Content-Type", "application/json"),
+        ],
         Some(&payload),
     );
 
@@ -81,13 +84,16 @@ fn enforces_route_level_rate_limiting() {
     let upstream = MockProvider::builder()
         .route(
             "/v1/chat",
-            MockResponse::json(200, json!({
-                "id": "rate-limit-ok",
-                "object": "chat.completion",
-                "choices": [
-                    {"index": 0, "message": {"role": "assistant", "content": "first"}}
-                ]
-            })),
+            MockResponse::json(
+                200,
+                json!({
+                    "id": "rate-limit-ok",
+                    "object": "chat.completion",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "first"}}
+                    ]
+                }),
+            ),
         )
         .build();
 
@@ -137,7 +143,11 @@ fn enforces_route_level_rate_limiting() {
     );
 
     let requests = upstream.received_requests();
-    assert_eq!(requests.len(), 1, "rate limiter should block second upstream call");
+    assert_eq!(
+        requests.len(),
+        1,
+        "rate limiter should block second upstream call"
+    );
 }
 
 #[test]
@@ -202,12 +212,19 @@ fn hot_reload_picks_up_updated_config() {
     );
     assert_eq!(updated.status, 200);
     let updated_body: serde_json::Value = serde_json::from_slice(&updated.body).unwrap();
-    assert_eq!(updated_body["id"], "provider-b", "router should use reloaded config");
+    assert_eq!(
+        updated_body["id"], "provider-b",
+        "router should use reloaded config"
+    );
 
     let requests_a = upstream_a.received_requests();
     let requests_b = upstream_b.received_requests();
     assert_eq!(requests_a.len(), 1, "first request hits provider A");
-    assert_eq!(requests_b.len(), 1, "after reload router should contact provider B");
+    assert_eq!(
+        requests_b.len(),
+        1,
+        "after reload router should contact provider B"
+    );
 }
 
 #[test]
@@ -217,10 +234,14 @@ fn forwards_streaming_sse_events() {
             "/v1beta/openai/chat/completions",
             MockResponse::stream(
                 200,
-                vec![("Content-Type", "text/event-stream"), ("X-Upstream", "gemini")],
+                vec![
+                    ("Content-Type", "text/event-stream"),
+                    ("X-Upstream", "gemini"),
+                ],
                 vec![
                     StreamChunk::new(b"data: {\"delta\":\"one\"}\n\n"),
-                    StreamChunk::new(b"data: {\"delta\":\"two\"}\n\n").with_delay(Duration::from_millis(50)),
+                    StreamChunk::new(b"data: {\"delta\":\"two\"}\n\n")
+                        .with_delay(Duration::from_millis(50)),
                     StreamChunk::new(b"data: [DONE]\n\n"),
                 ],
             ),
@@ -277,4 +298,80 @@ fn forwards_streaming_sse_events() {
     let forwarded: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(forwarded["model"], "gemini-1.5-pro");
     assert_eq!(forwarded["stream"], true);
+}
+
+#[test]
+fn exposes_prometheus_metrics() {
+    let upstream = MockProvider::builder()
+        .route(
+            "/v1/messages",
+            MockResponse::json(
+                200,
+                json!({
+                    "id": "metrics-ok",
+                    "object": "chat.completion",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "metrics"}}
+                    ]
+                }),
+            ),
+        )
+        .build();
+
+    let router_port = pick_free_port();
+    let config = ConfigFixture::provider("anthropic")
+        .with_base_url(&upstream.base_url())
+        .with_port(router_port)
+        .into_temp_file();
+
+    let _router = RouterProcess::start(config.path(), router_port, &[]);
+
+    let payload = serde_json::to_vec(&json!({
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": "emit metrics"}]
+    }))
+    .expect("to serialize chat completion payload");
+
+    let headers = [
+        ("Authorization", "Bearer metrics-test"),
+        ("Content-Type", "application/json"),
+    ];
+
+    let completion = send_http_request(
+        router_port,
+        "POST",
+        "/v1/chat/completions",
+        &headers,
+        Some(&payload),
+    );
+    assert_eq!(completion.status, 200);
+
+    let metrics_response = send_http_request(router_port, "GET", "/metrics", &[], None);
+    assert_eq!(metrics_response.status, 200);
+
+    let content_type = metrics_response.header("content-type").unwrap_or("");
+    assert!(
+        content_type.contains("text/plain"),
+        "metrics endpoint should return text/plain, got {}",
+        content_type
+    );
+
+    let body = metrics_response.body_utf8();
+    assert!(
+        body.contains("# HELP requests_total"),
+        "metrics output should include requests_total help text\n{}",
+        body
+    );
+    assert!(
+        body.contains(
+            "requests_total{method=\"POST\",route=\"/v1/chat/completions\",status=\"ok\"} 1"
+        ),
+        "expected chat completion counter in metrics\n{}",
+        body
+    );
+    assert!(
+        body.contains("cache_hits 1"),
+        "metrics output should include cache_hits gauge\n{}",
+        body
+    );
 }
