@@ -87,8 +87,10 @@ cargo run
 - `cargo run -- anthropic` 使用 `transformer/anthropic.json`
 - `cargo run -- cohere` 使用 `transformer/cohere.json`
 - `cargo run -- gemini` 使用 `transformer/gemini.json`
+- `cargo run -- ollama-cloud` 使用 `transformer/ollama-cloud.json`（Ollama Cloud API）
+- `cargo run -- ollama-local` 使用 `transformer/ollama-local.json`（本地 Ollama 实例）
 
-当前仓库预置的 transformer 配置包括 `qwen`（默认）、`openai`、`anthropic`、`cohere` 与 `gemini`，可通过上述参数快速切换不同的上游提供商。
+当前仓库预置的 transformer 配置包括 `qwen`（默认）、`openai`、`anthropic`、`cohere`、`gemini`、`ollama-cloud` 与 `ollama-local`，可通过上述参数快速切换不同的上游提供商。
 
 配套的 `test_api.sh` 脚本同样接受配置名与端口参数，例如 `./test_api.sh anthropic 9000` 会针对运行在 9000 端口且使用 `transformer/anthropic.json` 的服务发起请求示例。
 
@@ -335,6 +337,107 @@ curl -N -X POST http://localhost:8000/v1/messages \
     ]
   }'
 ```
+
+### Ollama 支持
+
+API Router 现已支持 Ollama API，提供两种配置：
+
+#### Ollama Cloud（`ollama-cloud`）
+
+用于 Ollama Cloud API（https://ollama.com/api），需要 API Key 认证。
+
+**启动服务**：
+```bash
+export DEFAULT_API_KEY="your-ollama-cloud-api-key"
+cargo run -- ollama-cloud
+```
+
+**Chat Completions（非流式）**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-ollama-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": false
+  }'
+```
+
+**Chat Completions（流式）**：
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-ollama-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": true
+  }'
+```
+
+#### Ollama Local（`ollama-local`）
+
+用于本地运行的 Ollama 实例（默认 http://localhost:11434），通常不需要 API Key。
+
+**启动服务**：
+```bash
+# 本地 Ollama 通常不需要 API Key，但仍可以设置（如果你的本地实例配置了认证）
+cargo run -- ollama-local
+```
+
+**Chat Completions**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ],
+    "stream": false
+  }'
+```
+
+**Text Completions（使用 `/api/generate`）**：
+```bash
+curl -X POST http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "prompt": "Write a haiku about programming"
+  }'
+```
+
+**Embeddings**：
+```bash
+curl -X POST http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "input": "Hello world"
+  }'
+```
+
+**端点映射**：
+- `/v1/chat/completions` → `/api/chat`
+- `/v1/completions` → `/api/generate`
+- `/v1/embeddings` → `/api/embeddings`
+
+**模型映射**：
+
+两个配置都提供了 OpenAI 模型到 Ollama 模型的默认映射：
+- `gpt-3.5-turbo` → `llama3.2`
+- `gpt-4` → `llama3.1:70b`
+- `gpt-4-turbo` → `llama3.1:70b`
+- `gpt-4o` → `llama3.1:405b`
+- `gpt-4o-mini` → `llama3.2`
+
+你也可以在配置文件中修改 `modelMapping` 来使用其他 Ollama 模型。
 
 ## 开发指南：Handlers 模块
 
