@@ -285,6 +285,24 @@ curl -X POST http://localhost:8000/v1/audio/translations \
   -F "prompt=Translate this recording"
 ```
 
+## 开发指南：Handlers 模块
+
+重新梳理后的 `handlers` 目录按职责拆分为五个子模块，便于后续维护与扩展：
+
+- `handlers/router.rs`：面向 TCP 连接的入口，负责读取原始字节流、调用解析器、执行限流校验，并委托路由层进行转发。
+- `handlers/parser.rs`：封装 HTTP 请求解析、Header 归一化、默认密钥解析等通用逻辑，同时提供 `ParsedRequest` 实例的便捷接口。
+- `handlers/plan.rs`：生成上游调用所需的 `ForwardPlan`，统一处理基地址合并、方法覆盖以及 Header 构建，避免重复克隆配置。
+- `handlers/routes.rs`：实现具体的 OpenAI 兼容路由，复用 `forward_json_route` 与 `forward_multipart_route` 处理 JSON/SSE 与 multipart 请求。
+- `handlers/response.rs`：构建响应报文并负责向客户端写回，消除 `Vec<u8> ⇆ String` 的多余转换。
+
+若要为代理增加新的 OpenAI 风格端点，可按照如下步骤扩展：
+
+1. 在 `routes.rs` 中注册新的路径，选择 `forward_json_route` 或 `forward_multipart_route` 并提供模型映射/流式判定函数；
+2. 视需要在配置文件中新增端点定义，`plan.rs` 会自动合并上游 Method、Header 与流式配置；
+3. 在 `handlers/tests.rs` 中补充针对新增路径的单元或集成测试，复用 `with_mock_http_client` 以隔离真实上游依赖。
+
+通过上述拆分，核心逻辑更加聚焦，测试覆盖也更加精确，有助于未来接入新的模型端点或协议扩展。
+
 ## 许可证
 
 MIT License
