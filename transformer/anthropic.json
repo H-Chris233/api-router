@@ -20,6 +20,12 @@
     },
     "/v1/embeddings": {
       "upstreamPath": "/v1/embeddings"
+    },
+    "/v1/messages": {
+      "headers": {
+        "Accept": "application/json, text/event-stream"
+      },
+      "streamSupport": true
     }
   },
   "modelMapping": {

@@ -139,3 +139,51 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 - ~~`futures-lite`~~ - 已用`smol::io`替代
 
 详见 `DEPENDENCY_AUDIT.md` 了解完整审计报告。
+
+## 异步运行时决策
+
+经过深度技术评估（详见 `RUNTIME_EVALUATION.md` 和 `RUNTIME_ANALYSIS.md`），项目选择**保持 smol 作为异步运行时**：
+
+### 为什么选择 smol？
+
+1. **已足够轻量**: smol 本质上是 async-executor + async-io + async-net 的薄封装，无显著开销
+2. **优秀的性能**: 二进制大小 3.4MB (LTO优化后)，编译时间约 68 秒
+3. **完美兼容性**: 与 async-tls/rustls 无缝集成，支持流式传输
+4. **简洁 API**: 统一的命名空间和易用接口，降低维护成本
+
+### 评估过的替代方案
+
+| 方案 | 结论 | 理由 |
+|------|------|------|
+| async-executor + async-io | ❌ 不采纳 | 收益 <3%，增加代码复杂度 |
+| tokio | ❌ 不采纳 | 更重（5-6MB），违背轻量化目标 |
+| monoio | ❌ 不采纳 | 兼容性差，需重写 I/O 代码 |
+
+### 编译优化配置
+
+项目使用以下编译优化以最小化二进制大小：
+
+```toml
+[profile.release]
+lto = true              # 链接时优化，实现跨 crate 优化
+codegen-units = 1       # 单个代码生成单元，提升优化质量
+strip = true            # 自动移除调试符号
+```
+
+**优化效果**:
+- 二进制从 4.8MB 缩减至 3.4MB (-29%)
+- 无功能损失，零业务逻辑改动
+
+### 性能基准
+
+运行 `benchmarks/simple_bench.sh` 可测量：
+- 编译时间
+- 二进制大小
+- 运行时响应延迟
+- 资源使用（内存、CPU）
+
+**关键指标** (当前):
+- 二进制大小: 3.4 MB (stripped with LTO)
+- 编译时间: ~68 秒 (release)
+- 启动时间: < 100 ms
+- 内存占用: < 20 MB (空闲)

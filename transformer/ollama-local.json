@@ -1,0 +1,40 @@
+{
+  "name": "ollama-local",
+  "baseUrl": "http://localhost:11434",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "api-router/1.0",
+    "Accept": "application/json"
+  },
+  "rateLimit": {
+    "requestsPerMinute": 300,
+    "burst": 100
+  },
+  "endpoints": {
+    "/v1/chat/completions": {
+      "upstreamPath": "/api/chat",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "streamSupport": true
+    },
+    "/v1/completions": {
+      "upstreamPath": "/api/generate",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "streamSupport": true
+    },
+    "/v1/embeddings": {
+      "upstreamPath": "/api/embeddings"
+    }
+  },
+  "modelMapping": {
+    "gpt-3.5-turbo": "llama3.2",
+    "gpt-4": "llama3.1:70b",
+    "gpt-4-turbo": "llama3.1:70b",
+    "gpt-4o": "llama3.1:405b",
+    "gpt-4o-mini": "llama3.2"
+  },
+  "port": 8000
+}

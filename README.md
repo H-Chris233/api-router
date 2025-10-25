@@ -14,6 +14,7 @@
 - 自动处理认证头、User-Agent 以及基础请求头
 - 支持模型名称映射（client model ➜ provider model）
 - 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
+- **支持 Anthropic Messages API（`/v1/messages`）**：原生支持 Anthropic 风格的请求格式，包括 system 提示、max_tokens 参数以及流式响应
 - 自动处理音频转写/翻译请求的 multipart/form-data 载荷
 - 动态加载 transformer 目录中的 JSON 配置文件
 - 支持基于 API Key 与路由粒度的令牌桶限流，超限时返回 429 并暴露健康指标
@@ -86,8 +87,10 @@ cargo run
 - `cargo run -- anthropic` 使用 `transformer/anthropic.json`
 - `cargo run -- cohere` 使用 `transformer/cohere.json`
 - `cargo run -- gemini` 使用 `transformer/gemini.json`
+- `cargo run -- ollama-cloud` 使用 `transformer/ollama-cloud.json`（Ollama Cloud API）
+- `cargo run -- ollama-local` 使用 `transformer/ollama-local.json`（本地 Ollama 实例）
 
-当前仓库预置的 transformer 配置包括 `qwen`（默认）、`openai`、`anthropic`、`cohere` 与 `gemini`，可通过上述参数快速切换不同的上游提供商。
+当前仓库预置的 transformer 配置包括 `qwen`（默认）、`openai`、`anthropic`、`cohere`、`gemini`、`ollama-cloud` 与 `ollama-local`，可通过上述参数快速切换不同的上游提供商。
 
 配套的 `test_api.sh` 脚本同样接受配置名与端口参数，例如 `./test_api.sh anthropic 9000` 会针对运行在 9000 端口且使用 `transformer/anthropic.json` 的服务发起请求示例。
 
@@ -210,6 +213,7 @@ API Router 支持配置流式传输的缓冲区大小和心跳间隔，可在全
 | POST | `/v1/embeddings` | Embeddings 代理 |
 | POST | `/v1/audio/transcriptions` | 音频转写代理（multipart/form-data） |
 | POST | `/v1/audio/translations` | 音频翻译代理（multipart/form-data） |
+| POST | `/v1/messages` | Anthropic Messages API 代理，支持流式 |
 
 ## 使用示例
 
@@ -284,6 +288,174 @@ curl -X POST http://localhost:8000/v1/audio/translations \
   -F "model=whisper-1" \
   -F "prompt=Translate this recording"
 ```
+
+### Anthropic Messages API（非流式）
+```bash
+curl -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-5-sonnet-20240620",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ]
+  }'
+```
+
+### Anthropic Messages API（带系统提示）
+```bash
+curl -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-haiku-20240307",
+    "max_tokens": 512,
+    "system": "你是一个友好的 Rust 编程助手。",
+    "messages": [
+      {"role": "user", "content": "什么是 async/await？"}
+    ],
+    "temperature": 0.7
+  }'
+```
+
+### Anthropic Messages API（流式）
+```bash
+curl -N -X POST http://localhost:8000/v1/messages \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "model": "claude-3-5-sonnet-20240620",
+    "max_tokens": 100,
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "数到5"}
+    ]
+  }'
+```
+
+### Ollama 支持
+
+API Router 现已支持 Ollama API，提供两种配置：
+
+#### Ollama Cloud（`ollama-cloud`）
+
+用于 Ollama Cloud API（https://ollama.com/api），需要 API Key 认证。
+
+**启动服务**：
+```bash
+export DEFAULT_API_KEY="your-ollama-cloud-api-key"
+cargo run -- ollama-cloud
+```
+
+**Chat Completions（非流式）**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-ollama-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": false
+  }'
+```
+
+**Chat Completions（流式）**：
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-ollama-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": true
+  }'
+```
+
+#### Ollama Local（`ollama-local`）
+
+用于本地运行的 Ollama 实例（默认 http://localhost:11434），通常不需要 API Key。
+
+**启动服务**：
+```bash
+# 本地 Ollama 通常不需要 API Key，但仍可以设置（如果你的本地实例配置了认证）
+cargo run -- ollama-local
+```
+
+**Chat Completions**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ],
+    "stream": false
+  }'
+```
+
+**Text Completions（使用 `/api/generate`）**：
+```bash
+curl -X POST http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "prompt": "Write a haiku about programming"
+  }'
+```
+
+**Embeddings**：
+```bash
+curl -X POST http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "input": "Hello world"
+  }'
+```
+
+**端点映射**：
+- `/v1/chat/completions` → `/api/chat`
+- `/v1/completions` → `/api/generate`
+- `/v1/embeddings` → `/api/embeddings`
+
+**模型映射**：
+
+两个配置都提供了 OpenAI 模型到 Ollama 模型的默认映射：
+- `gpt-3.5-turbo` → `llama3.2`
+- `gpt-4` → `llama3.1:70b`
+- `gpt-4-turbo` → `llama3.1:70b`
+- `gpt-4o` → `llama3.1:405b`
+- `gpt-4o-mini` → `llama3.2`
+
+你也可以在配置文件中修改 `modelMapping` 来使用其他 Ollama 模型。
+
+## 开发指南：Handlers 模块
+
+重新梳理后的 `handlers` 目录按职责拆分为五个子模块，便于后续维护与扩展：
+
+- `handlers/router.rs`：面向 TCP 连接的入口，负责读取原始字节流、调用解析器、执行限流校验，并委托路由层进行转发。
+- `handlers/parser.rs`：封装 HTTP 请求解析、Header 归一化、默认密钥解析等通用逻辑，同时提供 `ParsedRequest` 实例的便捷接口。
+- `handlers/plan.rs`：生成上游调用所需的 `ForwardPlan`，统一处理基地址合并、方法覆盖以及 Header 构建，避免重复克隆配置。
+- `handlers/routes.rs`：实现具体的 OpenAI 兼容路由，复用 `forward_json_route` 与 `forward_multipart_route` 处理 JSON/SSE 与 multipart 请求。
+- `handlers/response.rs`：构建响应报文并负责向客户端写回，消除 `Vec<u8> ⇆ String` 的多余转换。
+
+若要为代理增加新的 OpenAI 风格端点，可按照如下步骤扩展：
+
+1. 在 `routes.rs` 中注册新的路径，选择 `forward_json_route` 或 `forward_multipart_route` 并提供模型映射/流式判定函数；
+2. 视需要在配置文件中新增端点定义，`plan.rs` 会自动合并上游 Method、Header 与流式配置；
+3. 在 `handlers/tests.rs` 中补充针对新增路径的单元或集成测试，复用 `with_mock_http_client` 以隔离真实上游依赖。
+
+通过上述拆分，核心逻辑更加聚焦，测试覆盖也更加精确，有助于未来接入新的模型端点或协议扩展。
 
 ## 许可证
 
