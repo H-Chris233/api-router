@@ -1,10 +1,12 @@
 use crate::config::load_api_config;
 use crate::rate_limit::{resolve_rate_limit_settings, RateLimitDecision, RATE_LIMITER};
-use log::{debug, warn};
+use crate::tracing_util::{elapsed_ms, generate_request_id};
 use serde_json::json;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use smol::net::TcpStream;
 use std::net::SocketAddr;
+use std::time::Instant;
+use tracing::{debug, info, warn};
 
 use super::parser::{
     anonymize_key, extract_client_api_key, extract_content_length, parse_http_request,
@@ -14,6 +16,21 @@ use super::response::{build_error_response_with_headers, map_error_to_response, 
 use super::routes::handle_route;
 
 pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
+    let request_id = generate_request_id();
+    let request_start = Instant::now();
+    let client_ip = addr.ip().to_string();
+
+    let span = tracing::info_span!(
+        "http_request",
+        request_id = %request_id,
+        client_ip = %client_ip,
+        method = tracing::field::Empty,
+        route = tracing::field::Empty,
+        status_code = tracing::field::Empty,
+        latency_ms = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+
     debug!("New connection from {}", addr);
 
     let mut request_bytes = Vec::new();
@@ -56,6 +73,8 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
     let parsed_request = match parse_http_request(&request_bytes) {
         Ok(req) => req,
         Err(err) => {
+            span.record("status_code", 400);
+            span.record("latency_ms", elapsed_ms(request_start));
             let response = map_error_to_response(&err);
             let _ = stream.write_all(&response).await;
             let _ = stream.flush().await;
@@ -64,6 +83,8 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
     };
 
     let route_path = parsed_request.route_path();
+    span.record("method", parsed_request.method());
+    span.record("route", route_path);
 
     match (parsed_request.method(), route_path) {
         ("GET", "/health") => {
@@ -79,10 +100,16 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
             if let Ok(body) = serde_json::to_vec(&payload) {
                 let _ = write_success(&mut stream, "application/json", &body).await;
             }
+            span.record("status_code", 200);
+            span.record("latency_ms", elapsed_ms(request_start));
+            info!("Health check completed");
         }
         ("GET", "/v1/models") => {
             let body = b"{\"object\": \"list\", \"data\": [{\"id\": \"qwen3-coder-plus\", \"object\": \"model\", \"created\": 1677610602, \"owned_by\": \"organization-owner\"}]}";
             let _ = write_success(&mut stream, "application/json", body).await;
+            span.record("status_code", 200);
+            span.record("latency_ms", elapsed_ms(request_start));
+            info!("Models list retrieved");
         }
         ("POST", "/v1/chat/completions")
         | ("POST", "/v1/completions")
@@ -93,6 +120,8 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
             let config = match load_api_config() {
                 Ok(cfg) => cfg,
                 Err(err) => {
+                    span.record("status_code", 500);
+                    span.record("latency_ms", elapsed_ms(request_start));
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;
@@ -108,10 +137,12 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                     RateLimitDecision::Limited {
                         retry_after_seconds,
                     } => {
+                        span.record("status_code", 429);
+                        span.record("latency_ms", elapsed_ms(request_start));
                         warn!(
-                            "Rate limit exceeded for route {} and client {}",
-                            route_path,
-                            anonymize_key(&client_api_key)
+                            client = %anonymize_key(&client_api_key),
+                            retry_after = retry_after_seconds,
+                            "Rate limit exceeded"
                         );
                         let response = build_error_response_with_headers(
                             429,
@@ -132,16 +163,32 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                 &mut stream,
                 config.as_ref(),
                 &default_api_key,
+                &request_id,
             )
             .await;
 
-            if let Err(err) = result {
-                let response = map_error_to_response(&err);
-                let _ = stream.write_all(&response).await;
-                let _ = stream.flush().await;
+            match result {
+                Ok(()) => {
+                    span.record("status_code", 200);
+                    span.record("latency_ms", elapsed_ms(request_start));
+                    info!(
+                        provider = crate::tracing_util::extract_provider(&config.base_url),
+                        "Request completed successfully"
+                    );
+                }
+                Err(err) => {
+                    span.record("status_code", 500);
+                    span.record("latency_ms", elapsed_ms(request_start));
+                    let response = map_error_to_response(&err);
+                    let _ = stream.write_all(&response).await;
+                    let _ = stream.flush().await;
+                }
             }
         }
         _ => {
+            span.record("status_code", 404);
+            span.record("latency_ms", elapsed_ms(request_start));
+            warn!("Route not found");
             let response = b"HTTP/1.1 404 NOT FOUND\r\nContent-Length: 9\r\n\r\nNot Found";
             let _ = stream.write_all(response).await;
             let _ = stream.flush().await;

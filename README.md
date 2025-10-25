@@ -11,6 +11,11 @@
   - 可配置的缓冲区大小
   - 心跳保活（heartbeat keep-alive）
   - 客户端断连时优雅关闭
+- **结构化日志与延迟监控**：
+  - 基于 `tracing` 的请求级别跟踪（request ID、client IP、路由、方法）
+  - 自动测量总请求延迟与上游延迟
+  - 支持 JSON 格式输出，可集成 Datadog、Elasticsearch、Grafana Loki
+  - 可配置的日志级别和过滤器（通过 `RUST_LOG` 环境变量）
 - 自动处理认证头、User-Agent 以及基础请求头
 - 支持模型名称映射（client model ➜ provider model）
 - 支持 `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/audio/transcriptions`、`/v1/audio/translations` 等 OpenAI 风格端点
@@ -45,8 +50,9 @@
 **并发与日志**：
 - `dashmap` (v5) - 线程安全的并发 HashMap，用于速率限制
 - `once_cell` (v1.19) - 延迟初始化静态变量（`Lazy`）
-- `log` (v0.4) - 日志门面
-- `env_logger` (v0.11) - 环境变量配置的日志实现
+- `tracing` (v0.1) - 结构化日志与跟踪框架
+- `tracing-subscriber` (v0.3, features: json, env-filter) - 日志订阅器，支持 JSON 输出与环境变量过滤
+- `uuid` (v1.0, features: v4, fast-rng) - 生成请求 ID
 
 **错误处理**：
 - `thiserror` (v1) - 派生宏简化错误类型定义
@@ -55,6 +61,8 @@
 - ~~`async-channel`~~ - 未使用
 - ~~`bytes`~~ - 未使用
 - ~~`futures-lite`~~ - 已用 `smol::io` 提供的 I/O 扩展替代
+- ~~`log`~~ - 已迁移到 `tracing`
+- ~~`env_logger`~~ - 已替换为 `tracing-subscriber`
 
 通过精简依赖与禁用非必要特性，显著减少了依赖树深度与编译时间。
 
@@ -73,6 +81,12 @@ export DEFAULT_API_KEY="your-api-key-here"
 
 # 运行服务（默认使用 transformer/qwen.json）
 cargo run
+
+# 启用调试日志
+RUST_LOG=debug cargo run
+
+# 使用 JSON 格式日志（便于日志聚合）
+LOG_FORMAT=json cargo run
 ```
 
 ### 命令行参数
@@ -186,6 +200,35 @@ API Router 支持配置流式传输的缓冲区大小和心跳间隔，可在全
 - `heartbeatIntervalSecs`：心跳间隔（秒），默认 30 秒。在上游响应慢时发送心跳保持连接
 
 详细的流式传输文档请参阅 [STREAMING.md](STREAMING.md)。
+
+#### 结构化日志与跟踪配置
+
+API Router 使用 `tracing` 框架提供结构化日志和延迟监控：
+
+```bash
+# 设置日志级别（默认 info）
+export RUST_LOG=info          # 仅关键信息
+export RUST_LOG=debug         # 包含详细调试信息
+export RUST_LOG=warn          # 仅警告和错误
+
+# 设置日志格式（默认人类可读）
+export LOG_FORMAT=json        # JSON 格式，适合日志聚合系统
+
+# 模块级别过滤
+export RUST_LOG=api_router=debug,hyper=warn
+```
+
+**日志字段**：
+- `request_id`：每个请求的唯一 UUID
+- `client_ip`：客户端 IP 地址
+- `method`：HTTP 方法
+- `route`：请求路径
+- `status_code`：HTTP 状态码
+- `latency_ms`：总请求延迟（毫秒）
+- `provider`：上游提供商（qwen、openai、anthropic 等）
+- `upstream_latency_ms`：上游 API 延迟（毫秒）
+
+详细的日志配置文档请参阅 [TRACING.md](TRACING.md)。
 
 
 #### 限流配置
