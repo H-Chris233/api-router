@@ -2,11 +2,14 @@ use crate::config::ApiConfig;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
+use crate::tracing_util::{elapsed_ms, extract_provider};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use smol::net::TcpStream;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::time::Instant;
+use tracing::debug;
 
 use super::parser::ParsedRequest;
 use super::plan::{map_model_name, prepare_forward_plan};
@@ -18,6 +21,7 @@ pub(super) async fn handle_route(
     stream: &mut TcpStream,
     config: &ApiConfig,
     default_api_key: &str,
+    request_id: &str,
 ) -> RouterResult<()> {
     match route_path {
         "/v1/chat/completions" => {
@@ -27,6 +31,7 @@ pub(super) async fn handle_route(
                 stream,
                 config,
                 default_api_key,
+                request_id,
                 adjust_chat_request,
                 Some(chat_should_stream),
             )
@@ -39,6 +44,7 @@ pub(super) async fn handle_route(
                 stream,
                 config,
                 default_api_key,
+                request_id,
                 adjust_completion_request,
                 Some(completion_should_stream),
             )
@@ -51,13 +57,14 @@ pub(super) async fn handle_route(
                 stream,
                 config,
                 default_api_key,
+                request_id,
                 adjust_embedding_request,
                 None,
             )
             .await
         }
         "/v1/audio/transcriptions" | "/v1/audio/translations" => {
-            forward_multipart_route(route_path, request, stream, config, default_api_key).await
+            forward_multipart_route(route_path, request, stream, config, default_api_key, request_id).await
         }
         "/v1/messages" => {
             forward_json_route::<AnthropicMessagesRequest>(
@@ -66,6 +73,7 @@ pub(super) async fn handle_route(
                 stream,
                 config,
                 default_api_key,
+                request_id,
                 adjust_anthropic_request,
                 Some(anthropic_should_stream),
             )
@@ -81,12 +89,24 @@ async fn forward_json_route<T>(
     stream: &mut TcpStream,
     config: &ApiConfig,
     default_api_key: &str,
+    request_id: &str,
     adjust: fn(&ApiConfig, &mut T),
     stream_decider: Option<fn(&T) -> bool>,
 ) -> RouterResult<()>
 where
     T: DeserializeOwned + Serialize,
 {
+    let upstream_start = Instant::now();
+    let provider = extract_provider(&config.base_url);
+    
+    let span = tracing::debug_span!(
+        "upstream_request",
+        request_id = %request_id,
+        provider = %provider,
+        upstream_latency_ms = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+
     if !request.has_body() {
         return Err(RouterError::BadRequest("Empty request body".to_string()));
     }
@@ -108,6 +128,7 @@ where
         .unwrap_or(false);
 
     if should_stream {
+        debug!("Starting streaming request to upstream");
         handle_streaming_request(
             stream,
             plan.base_url(),
@@ -117,11 +138,19 @@ where
             &body_bytes,
             plan.stream_config(),
         )
-        .await?
+        .await?;
+        span.record("upstream_latency_ms", elapsed_ms(upstream_start));
+        debug!(upstream_latency_ms = elapsed_ms(upstream_start), "Streaming request completed");
     } else {
         let full_url = plan.full_url();
         let response_body =
             forward_to_upstream(&full_url, plan.method(), plan.headers(), Some(&body_bytes)).await?;
+        span.record("upstream_latency_ms", elapsed_ms(upstream_start));
+        debug!(
+            upstream_latency_ms = elapsed_ms(upstream_start),
+            response_size = response_body.len(),
+            "Upstream request completed"
+        );
         response::write_success(stream, "application/json", &response_body).await?;
     }
 
@@ -134,7 +163,18 @@ async fn forward_multipart_route(
     stream: &mut TcpStream,
     config: &ApiConfig,
     default_api_key: &str,
+    request_id: &str,
 ) -> RouterResult<()> {
+    let upstream_start = Instant::now();
+    let provider = extract_provider(&config.base_url);
+    
+    let span = tracing::debug_span!(
+        "upstream_multipart_request",
+        request_id = %request_id,
+        provider = %provider,
+        upstream_latency_ms = tracing::field::Empty,
+    );
+    let _enter = span.enter();
     if !request.has_body() {
         return Err(RouterError::BadRequest("Empty request body".to_string()));
     }
@@ -160,6 +200,12 @@ async fn forward_multipart_route(
         Some(body.as_ref()),
     )
     .await?;
+    span.record("upstream_latency_ms", elapsed_ms(upstream_start));
+    debug!(
+        upstream_latency_ms = elapsed_ms(upstream_start),
+        response_size = response_body.len(),
+        "Multipart upstream request completed"
+    );
     response::write_success(stream, "application/json", &response_body).await
 }
 

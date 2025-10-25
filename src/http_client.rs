@@ -2,10 +2,10 @@ use crate::errors::{RouterError, RouterResult};
 use crate::config::StreamConfig;
 use async_tls::TlsConnector;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use log::{debug, warn};
 use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tracing::{debug, warn};
 use url::Url;
 
 fn build_request_bytes(
