@@ -5,6 +5,10 @@ mod http_client;
 mod metrics;
 mod models;
 mod rate_limit;
+mod tracing_util;
+
+#[cfg(test)]
+mod tracing_tests;
 
 use config::{load_api_config, ApiConfig};
 use errors::RouterError;
@@ -14,8 +18,9 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 
-use log::{error, info, warn};
 use smol::net::TcpListener;
+use tracing::{error, info, warn};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 fn default_config() -> ApiConfig {
     ApiConfig {
@@ -29,9 +34,30 @@ fn default_config() -> ApiConfig {
     }
 }
 
+fn init_tracing() {
+    let use_json = env::var("LOG_FORMAT")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("json");
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
+
+    if use_json {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt::layer().json())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt::layer())
+            .init();
+    }
+}
+
 fn main() -> smol::io::Result<()> {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .try_init();
+    init_tracing();
 
     smol::block_on(async {
         let args: Vec<String> = env::args().collect();

@@ -1,6 +1,6 @@
 use crate::errors::{RouterError, RouterResult};
-use log::{debug, warn};
 use serde::Deserialize;
+use tracing::{debug, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;

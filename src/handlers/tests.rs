@@ -139,6 +139,7 @@ fn chat_completions_respects_endpoint_overrides() {
                     &mut server_stream,
                     &config,
                     "default-key",
+                    "test-req-id",
                 )
                 .await
                 .unwrap();
@@ -217,6 +218,7 @@ fn embeddings_route_forwards_with_mocked_upstream() {
                     &mut server_stream,
                     &config,
                     "unused-key",
+                    "test-req-id",
                 )
                 .await
                 .unwrap();
@@ -305,6 +307,7 @@ fn audio_route_rewrites_model_and_forwards() {
                     &mut server_stream,
                     &config,
                     "fallback-key",
+                    "test-req-id",
                 )
                 .await
                 .unwrap();
@@ -389,6 +392,7 @@ fn anthropic_messages_route_forwards_with_model_mapping() {
                     &mut server_stream,
                     &config,
                     "default-key",
+                    "test-req-id",
                 )
                 .await
                 .unwrap();
@@ -462,6 +466,7 @@ fn anthropic_messages_route_with_system_message() {
                     &mut server_stream,
                     &config,
                     "test-key",
+                    "test-req-id",
                 )
                 .await
                 .unwrap();
