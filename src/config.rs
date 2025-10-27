@@ -376,4 +376,157 @@ mod tests {
         fs::remove_file(&path).ok();
         reset_cache();
     }
+
+    #[test]
+    fn rate_limit_config_deserializes_with_all_fields() {
+        let config: RateLimitConfig = serde_json::from_str(
+            r#"{
+                "requestsPerMinute": 60,
+                "burst": 10
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.requests_per_minute, Some(60));
+        assert_eq!(config.burst, Some(10));
+    }
+
+    #[test]
+    fn rate_limit_config_defaults_work() {
+        let config: RateLimitConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(config.requests_per_minute, None);
+        assert_eq!(config.burst, None);
+    }
+
+    #[test]
+    fn stream_config_uses_defaults() {
+        let config: StreamConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(config.buffer_size, 8192);
+        assert_eq!(config.heartbeat_interval_secs, 30);
+    }
+
+    #[test]
+    fn stream_config_custom_values() {
+        let config: StreamConfig = serde_json::from_str(
+            r#"{
+                "bufferSize": 16384,
+                "heartbeatIntervalSecs": 60
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.buffer_size, 16384);
+        assert_eq!(config.heartbeat_interval_secs, 60);
+    }
+
+    #[test]
+    fn endpoint_config_deserializes_all_fields() {
+        let config: EndpointConfig = serde_json::from_str(
+            r#"{
+                "upstreamPath": "/v1/messages",
+                "method": "POST",
+                "headers": {"X-API-Version": "2023"},
+                "streamSupport": true,
+                "requiresMultipart": false,
+                "rateLimit": {
+                    "requestsPerMinute": 30,
+                    "burst": 5
+                },
+                "streamConfig": {
+                    "bufferSize": 4096,
+                    "heartbeatIntervalSecs": 15
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.upstream_path, Some("/v1/messages".to_string()));
+        assert_eq!(config.method, Some("POST".to_string()));
+        assert_eq!(config.headers.get("X-API-Version"), Some(&"2023".to_string()));
+        assert!(config.stream_support);
+        assert!(!config.requires_multipart);
+        assert!(config.rate_limit.is_some());
+        assert!(config.stream_config.is_some());
+    }
+
+    #[test]
+    fn api_config_with_rate_limit_and_stream_config() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.example.com",
+                "rateLimit": {
+                    "requestsPerMinute": 100
+                },
+                "streamConfig": {
+                    "bufferSize": 32768
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.base_url, "https://api.example.com");
+        assert!(config.rate_limit.is_some());
+        assert_eq!(config.rate_limit.unwrap().requests_per_minute, Some(100));
+        assert!(config.stream_config.is_some());
+        assert_eq!(config.stream_config.unwrap().buffer_size, 32768);
+    }
+
+    #[test]
+    fn api_config_model_mapping() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.example.com",
+                "modelMapping": {
+                    "gpt-4": "claude-3-opus",
+                    "gpt-3.5": "claude-3-sonnet"
+                }
+            }"#,
+        )
+        .unwrap();
+        let mapping = config.model_mapping.as_ref().unwrap();
+        assert_eq!(mapping.get("gpt-4"), Some(&"claude-3-opus".to_string()));
+        assert_eq!(mapping.get("gpt-3.5"), Some(&"claude-3-sonnet".to_string()));
+    }
+
+    #[test]
+    fn default_port_is_8000() {
+        assert_eq!(default_port(), 8000);
+    }
+
+    #[test]
+    fn api_config_uses_default_port() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.example.com"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.port, 8000);
+    }
+
+    #[test]
+    fn api_config_custom_port() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.example.com",
+                "port": 9000
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.port, 9000);
+    }
+
+    #[test]
+    fn rate_limit_config_equality() {
+        let config1 = RateLimitConfig {
+            requests_per_minute: Some(60),
+            burst: Some(10),
+        };
+        let config2 = RateLimitConfig {
+            requests_per_minute: Some(60),
+            burst: Some(10),
+        };
+        let config3 = RateLimitConfig {
+            requests_per_minute: Some(30),
+            burst: Some(10),
+        };
+        assert_eq!(config1, config2);
+        assert_ne!(config1, config3);
+    }
 }
