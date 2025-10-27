@@ -154,9 +154,7 @@ fn build_upstream_headers(
     default_api_key: &str,
     content_type: Option<&str>,
 ) -> HashMap<String, String> {
-    let mut headers = HashMap::with_capacity(
-        config.headers.len() + endpoint.headers.len() + 4,
-    );
+    let mut headers = HashMap::with_capacity(config.headers.len() + endpoint.headers.len() + 4);
 
     for (key, value) in &config.headers {
         headers.insert(key.clone(), value.clone());

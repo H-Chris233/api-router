@@ -31,8 +31,7 @@ pub(super) fn build_error_response_with_headers(
     .expect("writing to Vec<u8> cannot fail");
 
     for (key, value) in extra_headers {
-        write!(&mut response, "{}: {}\r\n", key, value)
-            .expect("writing to Vec<u8> cannot fail");
+        write!(&mut response, "{}: {}\r\n", key, value).expect("writing to Vec<u8> cannot fail");
     }
 
     response.extend_from_slice(b"\r\n");
@@ -49,7 +48,9 @@ pub(super) fn map_error_to_response(err: &RouterError) -> Vec<u8> {
         RouterError::Url(msg) | RouterError::Tls(msg) | RouterError::Upstream(msg) => {
             build_error_response(502, "BAD GATEWAY", msg)
         }
-        RouterError::Io(msg) => build_error_response(500, "INTERNAL SERVER ERROR", &msg.to_string()),
+        RouterError::Io(msg) => {
+            build_error_response(500, "INTERNAL SERVER ERROR", &msg.to_string())
+        }
         RouterError::Json(msg) => build_error_response(400, "BAD REQUEST", &msg.to_string()),
     }
 }

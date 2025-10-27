@@ -3,7 +3,7 @@ use super::plan::compute_upstream_path;
 use super::response::build_error_response_with_headers;
 use super::routes::{handle_route, with_mock_http_client};
 use crate::config::{ApiConfig, EndpointConfig};
-use crate::models::{ChatCompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
+use crate::models::{AnthropicMessagesRequest, ChatCompletionRequest, EmbeddingRequest};
 use serde_json::json;
 use serial_test::serial;
 use smol::io::AsyncReadExt;
@@ -92,7 +92,8 @@ fn chat_completions_respects_endpoint_overrides() {
             assert_eq!(url, "https://api.override/v1/messages?mode=test");
             assert_eq!(method, "PATCH");
             assert_eq!(headers.get("Accept"), Some(&"application/json".to_string()));
-            let payload: ChatCompletionRequest = serde_json::from_slice(body.expect("body")).unwrap();
+            let payload: ChatCompletionRequest =
+                serde_json::from_slice(body.expect("body")).unwrap();
             assert_eq!(payload.model, "claude-3-haiku");
             Ok(expected_body.clone())
         }),
@@ -170,8 +171,14 @@ fn embeddings_route_forwards_with_mocked_upstream() {
             *send_called_clone.lock().unwrap() = true;
             assert_eq!(url, "https://api.test/v1/embeddings");
             assert_eq!(method, "POST");
-            assert_eq!(headers.get("Content-Type"), Some(&"application/json".to_string()));
-            assert_eq!(headers.get("Authorization"), Some(&"Bearer client-key".to_string()));
+            assert_eq!(
+                headers.get("Content-Type"),
+                Some(&"application/json".to_string())
+            );
+            assert_eq!(
+                headers.get("Authorization"),
+                Some(&"Bearer client-key".to_string())
+            );
             let payload: EmbeddingRequest = serde_json::from_slice(body.expect("body")).unwrap();
             assert_eq!(payload.model, "qwen3");
             assert_eq!(payload.input, expected_input);
@@ -251,13 +258,18 @@ fn audio_route_rewrites_model_and_forwards() {
             assert_eq!(method, "POST");
             assert_eq!(
                 headers.get("Content-Type"),
-                Some(&format!("multipart/form-data; boundary={}", boundary_for_mock))
+                Some(&format!(
+                    "multipart/form-data; boundary={}",
+                    boundary_for_mock
+                ))
             );
             assert_eq!(
                 headers.get("Authorization"),
                 Some(&"Bearer test-key".to_string())
             );
-            let payload = std::str::from_utf8(body.expect("body")).unwrap().to_string();
+            let payload = std::str::from_utf8(body.expect("body"))
+                .unwrap()
+                .to_string();
             assert!(payload.contains("qwen-voice"));
             assert!(!payload.contains("whisper-1"));
             Ok(expected_body.clone())
@@ -286,7 +298,7 @@ fn audio_route_rewrites_model_and_forwards() {
                 let mut headers = HashMap::new();
                 headers.insert(
                     "content-type".to_string(),
-                    format!("multipart/form-data; boundary={}", boundary)
+                    format!("multipart/form-data; boundary={}", boundary),
                 );
                 headers.insert("authorization".to_string(), "Bearer test-key".to_string());
 
@@ -335,9 +347,16 @@ fn anthropic_messages_route_forwards_with_model_mapping() {
             *send_called_clone.lock().unwrap() = true;
             assert_eq!(url, "https://api.anthropic.com/v1/messages");
             assert_eq!(method, "POST");
-            assert_eq!(headers.get("Content-Type"), Some(&"application/json".to_string()));
-            assert_eq!(headers.get("anthropic-version"), Some(&"2023-06-01".to_string()));
-            let payload: AnthropicMessagesRequest = serde_json::from_slice(body.expect("body")).unwrap();
+            assert_eq!(
+                headers.get("Content-Type"),
+                Some(&"application/json".to_string())
+            );
+            assert_eq!(
+                headers.get("anthropic-version"),
+                Some(&"2023-06-01".to_string())
+            );
+            let payload: AnthropicMessagesRequest =
+                serde_json::from_slice(body.expect("body")).unwrap();
             assert_eq!(payload.model, "claude-3-5-sonnet-20240620");
             assert_eq!(payload.max_tokens, 100);
             assert_eq!(payload.messages.len(), 1);
@@ -371,7 +390,10 @@ fn anthropic_messages_route_forwards_with_model_mapping() {
                     ]
                 });
                 let mut headers = HashMap::new();
-                headers.insert("authorization".to_string(), "Bearer sk-ant-test-key".to_string());
+                headers.insert(
+                    "authorization".to_string(),
+                    "Bearer sk-ant-test-key".to_string(),
+                );
                 headers.insert("content-type".to_string(), "application/json".to_string());
 
                 let parsed_request = ParsedRequest::new_for_tests(
@@ -419,9 +441,13 @@ fn anthropic_messages_route_with_system_message() {
             *send_called_clone.lock().unwrap() = true;
             assert_eq!(url, "https://api.anthropic.com/v1/messages");
             assert_eq!(method, "POST");
-            let payload: AnthropicMessagesRequest = serde_json::from_slice(body.expect("body")).unwrap();
+            let payload: AnthropicMessagesRequest =
+                serde_json::from_slice(body.expect("body")).unwrap();
             assert_eq!(payload.model, "claude-3-haiku-20240307");
-            assert_eq!(payload.system, Some("You are a helpful assistant.".to_string()));
+            assert_eq!(
+                payload.system,
+                Some("You are a helpful assistant.".to_string())
+            );
             Ok(expected_body.clone())
         }),
         || {

@@ -43,7 +43,10 @@ pub struct RateLimitConfig {
 pub struct StreamConfig {
     #[serde(rename = "bufferSize", default = "default_buffer_size")]
     pub buffer_size: usize,
-    #[serde(rename = "heartbeatIntervalSecs", default = "default_heartbeat_interval")]
+    #[serde(
+        rename = "heartbeatIntervalSecs",
+        default = "default_heartbeat_interval"
+    )]
     pub heartbeat_interval_secs: u64,
 }
 
@@ -155,27 +158,19 @@ fn needs_reload(entry: &CachedConfig, paths: &ConfigPaths) -> bool {
 
 fn read_config_from_path(path: &Path) -> RouterResult<(ApiConfig, Option<SystemTime>)> {
     let file = File::open(path).map_err(|e| {
-        RouterError::ConfigRead(format!(
-            "failed to open {}: {}",
-            path.display(),
-            e
-        ))
+        RouterError::ConfigRead(format!("failed to open {}: {}", path.display(), e))
     })?;
     let modified = file.metadata().ok().and_then(|meta| meta.modified().ok());
     let mut reader = BufReader::with_capacity(CONFIG_BUFFER_SIZE, file);
-    let config: ApiConfig = serde_json::from_reader(&mut reader).map_err(|e| {
-        RouterError::ConfigParse(format!("{}: {}", path.display(), e))
-    })?;
+    let config: ApiConfig = serde_json::from_reader(&mut reader)
+        .map_err(|e| RouterError::ConfigParse(format!("{}: {}", path.display(), e)))?;
     Ok((config, modified))
 }
 
 fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
     match read_config_from_path(&paths.primary) {
         Ok((config, modified)) => {
-            debug!(
-                "loaded API config from {}",
-                paths.primary.display()
-            );
+            debug!("loaded API config from {}", paths.primary.display());
             Ok(CachedConfig {
                 config: Arc::new(config),
                 source: paths.primary.clone(),
@@ -185,11 +180,7 @@ fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
         Err(err) => match err {
             RouterError::ConfigParse(_) => Err(err),
             RouterError::ConfigRead(msg) => {
-                warn!(
-                    "{}; falling back to {}",
-                    msg,
-                    paths.fallback.display()
-                );
+                warn!("{}; falling back to {}", msg, paths.fallback.display());
                 let (config, modified) = read_config_from_path(&paths.fallback)?;
                 Ok(CachedConfig {
                     config: Arc::new(config),
@@ -210,10 +201,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
         let guard = cache.read().expect("config cache poisoned");
         if let Some(entry) = &guard.entry {
             if !needs_reload(entry, &paths) {
-                debug!(
-                    "using cached API config from {}",
-                    entry.source.display()
-                );
+                debug!("using cached API config from {}", entry.source.display());
                 return Ok(entry.config.clone());
             }
         }
@@ -222,10 +210,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
     let mut guard = cache.write().expect("config cache poisoned");
     if let Some(entry) = &guard.entry {
         if !needs_reload(entry, &paths) {
-            debug!(
-                "using cached API config from {}",
-                entry.source.display()
-            );
+            debug!("using cached API config from {}", entry.source.display());
             return Ok(entry.config.clone());
         }
     }
@@ -375,5 +360,219 @@ mod tests {
         std::env::remove_var("API_ROUTER_CONFIG_PATH");
         fs::remove_file(&path).ok();
         reset_cache();
+    }
+
+    #[test]
+    fn rate_limit_config_deserializes_with_all_fields() {
+        let config: RateLimitConfig = serde_json::from_str(
+            r#"{
+                "requestsPerMinute": 100,
+                "burst": 150
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.requests_per_minute, Some(100));
+        assert_eq!(config.burst, Some(150));
+    }
+
+    #[test]
+    fn rate_limit_config_deserializes_with_missing_fields() {
+        let config: RateLimitConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(config.requests_per_minute, None);
+        assert_eq!(config.burst, None);
+    }
+
+    #[test]
+    fn rate_limit_config_equality_works() {
+        let config1 = RateLimitConfig {
+            requests_per_minute: Some(100),
+            burst: Some(200),
+        };
+        let config2 = RateLimitConfig {
+            requests_per_minute: Some(100),
+            burst: Some(200),
+        };
+        let config3 = RateLimitConfig {
+            requests_per_minute: Some(50),
+            burst: Some(100),
+        };
+
+        assert_eq!(config1, config2);
+        assert_ne!(config1, config3);
+    }
+
+    #[test]
+    fn stream_config_uses_defaults() {
+        let config: StreamConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(config.buffer_size, 8192);
+        assert_eq!(config.heartbeat_interval_secs, 30);
+    }
+
+    #[test]
+    fn stream_config_overrides_defaults() {
+        let config: StreamConfig = serde_json::from_str(
+            r#"{
+                "bufferSize": 16384,
+                "heartbeatIntervalSecs": 60
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.buffer_size, 16384);
+        assert_eq!(config.heartbeat_interval_secs, 60);
+    }
+
+    #[test]
+    fn endpoint_config_parses_all_fields() {
+        let config: EndpointConfig = serde_json::from_str(
+            r#"{
+                "upstreamPath": "/v1/messages",
+                "method": "PATCH",
+                "headers": {"X-Custom": "value"},
+                "streamSupport": true,
+                "requiresMultipart": false,
+                "rateLimit": {
+                    "requestsPerMinute": 10,
+                    "burst": 20
+                },
+                "streamConfig": {
+                    "bufferSize": 4096,
+                    "heartbeatIntervalSecs": 45
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.upstream_path.as_deref(), Some("/v1/messages"));
+        assert_eq!(config.method.as_deref(), Some("PATCH"));
+        assert_eq!(config.headers.get("X-Custom"), Some(&"value".to_string()));
+        assert!(config.stream_support);
+        assert!(!config.requires_multipart);
+        assert_eq!(
+            config.rate_limit.as_ref().unwrap().requests_per_minute,
+            Some(10)
+        );
+        assert_eq!(config.stream_config.as_ref().unwrap().buffer_size, 4096);
+    }
+
+    #[test]
+    fn api_config_parses_with_model_mapping() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "modelMapping": {
+                    "gpt-4": "claude-3-opus",
+                    "gpt-3.5-turbo": "claude-3-sonnet"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mapping = config.model_mapping.as_ref().unwrap();
+        assert_eq!(mapping.get("gpt-4"), Some(&"claude-3-opus".to_string()));
+        assert_eq!(
+            mapping.get("gpt-3.5-turbo"),
+            Some(&"claude-3-sonnet".to_string())
+        );
+    }
+
+    #[test]
+    fn api_config_parses_with_global_rate_limit() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "rateLimit": {
+                    "requestsPerMinute": 60,
+                    "burst": 100
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let rate_limit = config.rate_limit.as_ref().unwrap();
+        assert_eq!(rate_limit.requests_per_minute, Some(60));
+        assert_eq!(rate_limit.burst, Some(100));
+    }
+
+    #[test]
+    fn api_config_parses_with_global_stream_config() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "streamConfig": {
+                    "bufferSize": 32768,
+                    "heartbeatIntervalSecs": 15
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let stream_config = config.stream_config.as_ref().unwrap();
+        assert_eq!(stream_config.buffer_size, 32768);
+        assert_eq!(stream_config.heartbeat_interval_secs, 15);
+    }
+
+    #[test]
+    fn api_config_endpoint_method_returns_config_when_exists() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "endpoints": {
+                    "/v1/chat/completions": {
+                        "upstreamPath": "/chat"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let endpoint = config.endpoint("/v1/chat/completions");
+        assert_eq!(endpoint.upstream_path.as_deref(), Some("/chat"));
+    }
+
+    #[test]
+    fn api_config_endpoint_method_returns_default_when_missing() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "endpoints": {}
+            }"#,
+        )
+        .unwrap();
+
+        let endpoint = config.endpoint("/v1/unknown");
+        assert!(endpoint.upstream_path.is_none());
+        assert!(endpoint.headers.is_empty());
+    }
+
+    #[test]
+    fn api_config_uses_custom_port() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test",
+                "port": 9000
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.port, 9000);
+    }
+
+    #[test]
+    fn api_config_defaults_to_port_8000() {
+        let config: ApiConfig = serde_json::from_str(
+            r#"{
+                "baseUrl": "https://api.test"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.port, 8000);
+    }
+
+    #[test]
+    fn default_port_function_returns_8000() {
+        assert_eq!(default_port(), 8000);
     }
 }

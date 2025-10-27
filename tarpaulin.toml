@@ -1,0 +1,42 @@
+[default]
+# Tarpaulin configuration for code coverage
+# Run with: cargo tarpaulin --config tarpaulin.toml
+
+# Generate HTML report
+out = ["Html", "Lcov"]
+
+# Output directory for coverage reports
+output-dir = "target/coverage"
+
+# Exclude test files from coverage
+exclude = [
+    "tests/*",
+    "*/tests.rs",
+    "benches/*",
+]
+
+# Include all features
+all-features = true
+
+# Timeout for tests (in seconds)
+timeout = 300
+
+# Run tests in serial mode to avoid conflicts
+# Uncomment if you have tests that conflict when run in parallel
+# run-types = ["Tests", "Doctests"]
+
+# Target coverage threshold (percentage)
+# Uncomment to enforce minimum coverage
+# fail-under = 70
+
+# Follow symbolic links
+follow-exec = true
+
+# Count hits per line
+count = true
+
+# Ignore panics in coverage
+ignore-panics = true
+
+# Include test binaries in coverage
+include-tests = false

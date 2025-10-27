@@ -2,7 +2,9 @@ use crate::config::ApiConfig;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::metrics::record_upstream_error;
-use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
+use crate::models::{
+    AnthropicMessagesRequest, ChatCompletionRequest, CompletionRequest, EmbeddingRequest,
+};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use smol::net::TcpStream;
@@ -138,7 +140,8 @@ where
     } else {
         let full_url = plan.full_url();
         let response_body =
-            forward_to_upstream(&full_url, plan.method(), plan.headers(), Some(&body_bytes)).await?;
+            forward_to_upstream(&full_url, plan.method(), plan.headers(), Some(&body_bytes))
+                .await?;
         response::write_success(stream, "application/json", &response_body).await?;
     }
 

@@ -22,8 +22,8 @@ fn wait_for_server(port: u16, max_attempts: u32) {
 }
 
 fn send_request(port: u16, request: &str) -> String {
-    let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))
-        .expect("failed to connect to server");
+    let mut stream =
+        TcpStream::connect(format!("127.0.0.1:{}", port)).expect("failed to connect to server");
 
     stream
         .write_all(request.as_bytes())
@@ -53,7 +53,9 @@ fn send_request(port: u16, request: &str) -> String {
         } else {
             response.push_str(&line);
             response.push('\n');
-            if response.len() - response.lines().take_while(|l| !l.is_empty()).count() >= content_length {
+            if response.len() - response.lines().take_while(|l| !l.is_empty()).count()
+                >= content_length
+            {
                 break;
             }
         }
@@ -107,7 +109,7 @@ fn metrics_tracks_request_counts() {
         "GET /health HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
         port
     );
-    
+
     for _ in 0..5 {
         let _response = send_request(port, &health_request);
         thread::sleep(Duration::from_millis(50));

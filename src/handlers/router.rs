@@ -99,7 +99,12 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
             update_rate_limiter_buckets(snapshot.active_buckets);
             match gather_metrics() {
                 Ok(metrics_output) => {
-                    let _ = write_success(&mut stream, "text/plain; version=0.0.4", metrics_output.as_bytes()).await;
+                    let _ = write_success(
+                        &mut stream,
+                        "text/plain; version=0.0.4",
+                        metrics_output.as_bytes(),
+                    )
+                    .await;
                     let latency = start_time.elapsed().as_secs_f64();
                     observe_request_latency("/metrics", latency);
                     record_request("/metrics", "GET", 200);

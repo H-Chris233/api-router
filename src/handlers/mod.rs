@@ -1,8 +1,8 @@
 mod parser;
 mod plan;
 mod response;
-mod routes;
 mod router;
+mod routes;
 
 pub use router::handle_request;
 

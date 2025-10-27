@@ -269,14 +269,16 @@ mod tests {
     #[test]
     fn resolve_uses_endpoint_first() {
         let mut config = base_config();
-        let mut endpoint = EndpointConfig::default();
-        endpoint.rate_limit = Some(RateLimitConfig {
-            requests_per_minute: Some(10),
-            burst: Some(20),
-        });
+        let endpoint = EndpointConfig {
+            rate_limit: Some(RateLimitConfig {
+                requests_per_minute: Some(10),
+                burst: Some(20),
+            }),
+            ..Default::default()
+        };
         config
             .endpoints
-            .insert("/v1/test".to_string(), endpoint.clone());
+            .insert("/v1/test".to_string(), endpoint);
         config.rate_limit = Some(RateLimitConfig {
             requests_per_minute: Some(1),
             burst: Some(2),
@@ -290,11 +292,13 @@ mod tests {
     #[test]
     fn resolve_defaults_burst_to_requests_per_minute() {
         let mut config = base_config();
-        let mut endpoint = EndpointConfig::default();
-        endpoint.rate_limit = Some(RateLimitConfig {
-            requests_per_minute: Some(12),
-            burst: None,
-        });
+        let endpoint = EndpointConfig {
+            rate_limit: Some(RateLimitConfig {
+                requests_per_minute: Some(12),
+                burst: None,
+            }),
+            ..Default::default()
+        };
         config.endpoints.insert("/v1/test".to_string(), endpoint);
 
         let settings = resolve_rate_limit_settings("/v1/test", &config).expect("expected settings");
@@ -330,5 +334,173 @@ mod tests {
             burst: Some(10),
         });
         assert!(resolve_rate_limit_settings("/v1/test", &config).is_none());
+    }
+
+    #[test]
+    fn token_bucket_refills_tokens_over_time() {
+        use std::time::{Duration, Instant};
+
+        let settings = RateLimitSettings {
+            requests_per_minute: 60,
+            burst: 2,
+        };
+
+        let mut bucket = TokenBucket::new(settings.clone(), Instant::now());
+        assert!(bucket.try_consume(Instant::now()).is_ok());
+        assert!(bucket.try_consume(Instant::now()).is_ok());
+        assert!(bucket.try_consume(Instant::now()).is_err());
+
+        let future_time = Instant::now() + Duration::from_secs(2);
+        bucket.refill(future_time);
+        assert!(bucket.tokens > 1.0);
+    }
+
+    #[test]
+    fn token_bucket_caps_at_capacity() {
+        use std::time::{Duration, Instant};
+
+        let settings = RateLimitSettings {
+            requests_per_minute: 60,
+            burst: 5,
+        };
+
+        let mut bucket = TokenBucket::new(settings.clone(), Instant::now());
+
+        let way_future = Instant::now() + Duration::from_secs(1000);
+        bucket.refill(way_future);
+
+        assert_eq!(bucket.tokens, 5.0);
+    }
+
+    #[test]
+    fn rate_limit_decision_equality() {
+        assert_eq!(RateLimitDecision::Allowed, RateLimitDecision::Allowed);
+        assert_eq!(
+            RateLimitDecision::Limited {
+                retry_after_seconds: 5
+            },
+            RateLimitDecision::Limited {
+                retry_after_seconds: 5
+            }
+        );
+        assert_ne!(
+            RateLimitDecision::Allowed,
+            RateLimitDecision::Limited {
+                retry_after_seconds: 1
+            }
+        );
+    }
+
+    #[test]
+    fn rate_limiter_isolates_different_routes() {
+        let limiter = RateLimiter::new();
+        let settings = RateLimitSettings {
+            requests_per_minute: 1,
+            burst: 1,
+        };
+
+        assert!(matches!(
+            limiter.check("/route/a", "client", &settings),
+            RateLimitDecision::Allowed
+        ));
+        assert!(matches!(
+            limiter.check("/route/b", "client", &settings),
+            RateLimitDecision::Allowed
+        ));
+    }
+
+    #[test]
+    fn rate_limiter_isolates_different_clients() {
+        let limiter = RateLimiter::new();
+        let settings = RateLimitSettings {
+            requests_per_minute: 1,
+            burst: 1,
+        };
+
+        assert!(matches!(
+            limiter.check("/route", "client-a", &settings),
+            RateLimitDecision::Allowed
+        ));
+        assert!(matches!(
+            limiter.check("/route", "client-b", &settings),
+            RateLimitDecision::Allowed
+        ));
+    }
+
+    #[test]
+    fn rate_limit_settings_equality() {
+        let settings1 = RateLimitSettings {
+            requests_per_minute: 100,
+            burst: 200,
+        };
+        let settings2 = RateLimitSettings {
+            requests_per_minute: 100,
+            burst: 200,
+        };
+        let settings3 = RateLimitSettings {
+            requests_per_minute: 50,
+            burst: 100,
+        };
+
+        assert_eq!(settings1, settings2);
+        assert_ne!(settings1, settings3);
+    }
+
+    #[test]
+    fn resolve_enforces_minimum_burst_of_one() {
+        let mut config = base_config();
+        config.rate_limit = Some(RateLimitConfig {
+            requests_per_minute: Some(10),
+            burst: Some(0),
+        });
+
+        let settings = resolve_rate_limit_settings("/v1/test", &config).expect("expected settings");
+        assert_eq!(settings.burst, 1);
+    }
+
+    #[test]
+    fn snapshot_handles_empty_limiter() {
+        let limiter = RateLimiter::new();
+        let snapshot = limiter.snapshot();
+        assert_eq!(snapshot.active_buckets, 0);
+        assert!(snapshot.routes.is_empty());
+    }
+
+    #[test]
+    fn limiter_returns_retry_after_when_limited() {
+        let limiter = RateLimiter::new();
+        let settings = RateLimitSettings {
+            requests_per_minute: 1,
+            burst: 1,
+        };
+
+        let _ = limiter.check("/test", "client", &settings);
+        match limiter.check("/test", "client", &settings) {
+            RateLimitDecision::Limited {
+                retry_after_seconds,
+            } => {
+                assert!(retry_after_seconds >= 1);
+            }
+            RateLimitDecision::Allowed => panic!("expected limited"),
+        }
+    }
+
+    #[test]
+    fn resolve_prioritizes_config_over_environment() {
+        std::env::set_var("RATE_LIMIT_REQUESTS_PER_MINUTE", "50");
+        std::env::set_var("RATE_LIMIT_BURST", "100");
+
+        let mut config = base_config();
+        config.rate_limit = Some(RateLimitConfig {
+            requests_per_minute: Some(200),
+            burst: Some(300),
+        });
+
+        let settings = resolve_rate_limit_settings("/v1/test", &config).expect("expected settings");
+        assert_eq!(settings.requests_per_minute, 200);
+        assert_eq!(settings.burst, 300);
+
+        std::env::remove_var("RATE_LIMIT_REQUESTS_PER_MINUTE");
+        std::env::remove_var("RATE_LIMIT_BURST");
     }
 }

@@ -1,8 +1,8 @@
-use crate::errors::{RouterError, RouterResult};
 use crate::config::StreamConfig;
+use crate::errors::{RouterError, RouterResult};
 use async_tls::TlsConnector;
-use smol::io::{AsyncReadExt, AsyncWriteExt};
 use log::{debug, warn};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -289,4 +289,128 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_request_bytes_creates_valid_http_request() {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("Authorization".to_string(), "Bearer token".to_string());
+
+        let body = b"{\"test\":\"data\"}";
+        let request =
+            build_request_bytes("POST", "/v1/test", "api.example.com", &headers, Some(body));
+        let request_str = String::from_utf8_lossy(&request);
+
+        assert!(request_str.starts_with("POST /v1/test HTTP/1.1\r\n"));
+        assert!(request_str.contains("Host: api.example.com\r\n"));
+        assert!(request_str.contains("Connection: close\r\n"));
+        assert!(request_str.contains("Content-Type: application/json\r\n"));
+        assert!(request_str.contains("Authorization: Bearer token\r\n"));
+        assert!(request_str.contains(&format!("Content-Length: {}\r\n", body.len())));
+        assert!(request_str.ends_with("{\"test\":\"data\"}"));
+    }
+
+    #[test]
+    fn build_request_bytes_without_body() {
+        let headers = HashMap::new();
+        let request = build_request_bytes("GET", "/health", "api.example.com", &headers, None);
+        let request_str = String::from_utf8_lossy(&request);
+
+        assert!(request_str.starts_with("GET /health HTTP/1.1\r\n"));
+        assert!(request_str.contains("Host: api.example.com\r\n"));
+        assert!(request_str.contains("Connection: close\r\n"));
+        assert!(!request_str.contains("Content-Length"));
+        assert!(request_str.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn build_request_bytes_handles_empty_body() {
+        let headers = HashMap::new();
+        let request = build_request_bytes("POST", "/test", "api.example.com", &headers, Some(b""));
+        let request_str = String::from_utf8_lossy(&request);
+
+        assert!(request_str.contains("Content-Length: 0\r\n"));
+    }
+
+    #[test]
+    fn extract_body_from_response_finds_body_after_headers() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello World";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, b"Hello World");
+    }
+
+    #[test]
+    fn extract_body_from_response_handles_empty_body() {
+        let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, b"");
+    }
+
+    #[test]
+    fn extract_body_from_response_returns_full_response_if_no_separator() {
+        let response = b"Invalid response without separator";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, response);
+    }
+
+    #[test]
+    fn extract_body_from_response_handles_json_body() {
+        let json_response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"data\":[1,2,3]}";
+        let body = extract_body_from_response(json_response.to_vec());
+        assert_eq!(body, b"{\"status\":\"ok\",\"data\":[1,2,3]}");
+
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["status"], "ok");
+    }
+
+    #[test]
+    fn path_with_query_handles_path_only() {
+        let url = Url::parse("https://api.example.com/v1/chat/completions").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/v1/chat/completions");
+    }
+
+    #[test]
+    fn path_with_query_includes_query_string() {
+        let url = Url::parse("https://api.example.com/v1/models?limit=10&offset=0").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/v1/models?limit=10&offset=0");
+    }
+
+    #[test]
+    fn path_with_query_handles_root_path() {
+        let url = Url::parse("https://api.example.com/").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/");
+    }
+
+    #[test]
+    fn path_with_query_handles_empty_path() {
+        let url = Url::parse("https://api.example.com").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/");
+    }
+
+    #[test]
+    fn path_with_query_handles_complex_query_params() {
+        let url = Url::parse("https://api.example.com/search?q=rust+programming&page=1&sort=date")
+            .unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/search?q=rust+programming&page=1&sort=date");
+    }
+
+    #[test]
+    fn path_with_query_preserves_encoded_characters() {
+        let url =
+            Url::parse("https://api.example.com/path?name=John%20Doe&email=test%40example.com")
+                .unwrap();
+        let result = path_with_query(&url);
+        assert!(result.contains("name=John%20Doe"));
+        assert!(result.contains("email=test%40example.com"));
+    }
 }

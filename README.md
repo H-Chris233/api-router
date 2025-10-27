@@ -463,6 +463,53 @@ curl -X POST http://localhost:8000/v1/embeddings \
 
 通过上述拆分，核心逻辑更加聚焦，测试覆盖也更加精确，有助于未来接入新的模型端点或协议扩展。
 
+## 测试与代码覆盖率
+
+项目包含全面的单元测试和集成测试，覆盖所有核心模块。
+
+### 运行测试
+
+```bash
+# 运行所有测试
+cargo test
+
+# 运行特定模块的测试
+cargo test config::tests
+cargo test models::tests
+cargo test rate_limit::tests
+
+# 运行测试并显示输出
+cargo test -- --nocapture
+```
+
+### 代码覆盖率
+
+项目支持使用 `cargo-tarpaulin` 生成代码覆盖率报告：
+
+```bash
+# 安装 tarpaulin
+cargo install cargo-tarpaulin
+
+# 生成 HTML 覆盖率报告
+./run_coverage.sh html
+
+# 或手动运行
+cargo tarpaulin --config tarpaulin.toml --out Html --output-dir target/coverage
+```
+
+覆盖率报告将生成在 `target/coverage/tarpaulin-report.html`。
+
+### 测试覆盖模块
+
+- ✅ **config.rs**: 配置解析、缓存、重载、率限配置、流配置
+- ✅ **rate_limit.rs**: 令牌桶算法、限流决策、配置解析
+- ✅ **models.rs**: 请求/响应模型序列化、OpenAI 与 Anthropic 格式
+- ✅ **errors.rs**: 错误类型、错误转换、错误显示
+- ✅ **http_client.rs**: HTTP 请求构建、响应解析、URL 处理
+- ✅ **handlers/**: 请求解析、路由处理、响应生成
+
+详细的测试指南和覆盖率配置请参阅 [TESTING_AND_COVERAGE.md](TESTING_AND_COVERAGE.md)。
+
 ## 监控与指标
 
 API Router 集成了 Prometheus 指标收集，通过 `/metrics` 端点暴露性能数据：

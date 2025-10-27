@@ -41,7 +41,10 @@ fn main() -> smol::io::Result<()> {
             Err(err) => {
                 match &err {
                     RouterError::ConfigParse(message) => {
-                        warn!("Failed to parse config, using default port 8000: {}", message)
+                        warn!(
+                            "Failed to parse config, using default port 8000: {}",
+                            message
+                        )
                     }
                     RouterError::ConfigRead(message) => {
                         error!(
