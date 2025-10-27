@@ -2,6 +2,7 @@ mod config;
 mod errors;
 mod handlers;
 mod http_client;
+mod metrics;
 mod models;
 mod rate_limit;
 mod tracing_util;

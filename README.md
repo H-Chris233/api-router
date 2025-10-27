@@ -23,6 +23,7 @@
 - 自动处理音频转写/翻译请求的 multipart/form-data 载荷
 - 动态加载 transformer 目录中的 JSON 配置文件
 - 支持基于 API Key 与路由粒度的令牌桶限流，超限时返回 429 并暴露健康指标
+- **Prometheus 指标集成**：通过 `/metrics` 端点暴露请求计数、延迟分布、活跃连接数、上游错误等指标，便于监控和告警
 
 ## 安装与运行
 
@@ -56,6 +57,10 @@
 
 **错误处理**：
 - `thiserror` (v1) - 派生宏简化错误类型定义
+
+**监控与指标**：
+- `prometheus` (v0.13, 无默认特性) - Prometheus 指标收集
+- `lazy_static` (v1.4) - 静态变量初始化，用于全局指标注册
 
 **已移除的冗余依赖**：
 - ~~`async-channel`~~ - 未使用
@@ -250,6 +255,7 @@ export RUST_LOG=api_router=debug,hyper=warn
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
 | GET  | `/health` | 健康检查（包含限流指标） |
+| GET  | `/metrics` | Prometheus 格式性能指标 |
 | GET  | `/v1/models` | 返回可用模型列表（示例数据） |
 | POST | `/v1/chat/completions` | Chat Completions 代理，支持流式 |
 | POST | `/v1/completions` | Text Completions 代理，支持流式 |
@@ -499,6 +505,24 @@ curl -X POST http://localhost:8000/v1/embeddings \
 3. 在 `handlers/tests.rs` 中补充针对新增路径的单元或集成测试，复用 `with_mock_http_client` 以隔离真实上游依赖。
 
 通过上述拆分，核心逻辑更加聚焦，测试覆盖也更加精确，有助于未来接入新的模型端点或协议扩展。
+
+## 监控与指标
+
+API Router 集成了 Prometheus 指标收集，通过 `/metrics` 端点暴露性能数据：
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+### 可用指标
+
+- **`requests_total`**：按路由、方法和状态码统计的请求总数（Counter）
+- **`upstream_errors_total`**：按错误类型统计的上游错误总数（Counter）
+- **`request_latency_seconds`**：按路由统计的请求延迟分布（Histogram）
+- **`active_connections`**：当前活跃连接数（Gauge）
+- **`rate_limiter_buckets`**：活跃的限流令牌桶数量（Gauge）
+
+详细的指标说明、Prometheus 配置示例和 Grafana 查询请参阅 [METRICS.md](METRICS.md)。
 
 ## 许可证
 

@@ -1,6 +1,7 @@
 use crate::config::ApiConfig;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
+use crate::metrics::record_upstream_error;
 use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
 use crate::tracing_util::{elapsed_ms, extract_provider};
 use serde::de::DeserializeOwned;
@@ -23,7 +24,7 @@ pub(super) async fn handle_route(
     default_api_key: &str,
     request_id: &str,
 ) -> RouterResult<()> {
-    match route_path {
+    let result = match route_path {
         "/v1/chat/completions" => {
             forward_json_route::<ChatCompletionRequest>(
                 route_path,
@@ -80,7 +81,23 @@ pub(super) async fn handle_route(
             .await
         }
         _ => Err(RouterError::BadRequest("Unsupported route".to_string())),
+    };
+
+    if let Err(ref err) = result {
+        let error_type = match err {
+            RouterError::Url(_) => "url_error",
+            RouterError::Io(_) => "io_error",
+            RouterError::ConfigRead(_) => "config_read_error",
+            RouterError::ConfigParse(_) => "config_parse_error",
+            RouterError::Json(_) => "json_error",
+            RouterError::Upstream(_) => "upstream_error",
+            RouterError::Tls(_) => "tls_error",
+            RouterError::BadRequest(_) => "bad_request",
+        };
+        record_upstream_error(error_type);
     }
+
+    result
 }
 
 async fn forward_json_route<T>(
