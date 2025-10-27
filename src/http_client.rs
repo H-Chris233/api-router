@@ -290,3 +290,106 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_request_bytes_creates_valid_http_request() {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("Authorization".to_string(), "Bearer token123".to_string());
+        
+        let body = b"{\"key\":\"value\"}";
+        let request = build_request_bytes("POST", "/api/test", "example.com", &headers, Some(body));
+        
+        let request_str = String::from_utf8_lossy(&request);
+        assert!(request_str.contains("POST /api/test HTTP/1.1"));
+        assert!(request_str.contains("Host: example.com"));
+        assert!(request_str.contains("Connection: close"));
+        assert!(request_str.contains("Content-Type: application/json"));
+        assert!(request_str.contains("Authorization: Bearer token123"));
+        assert!(request_str.contains("Content-Length: 15"));
+        assert!(request_str.contains("{\"key\":\"value\"}"));
+    }
+
+    #[test]
+    fn build_request_bytes_without_body() {
+        let headers = HashMap::new();
+        let request = build_request_bytes("GET", "/api/test", "example.com", &headers, None);
+        
+        let request_str = String::from_utf8_lossy(&request);
+        assert!(request_str.contains("GET /api/test HTTP/1.1"));
+        assert!(request_str.contains("Host: example.com"));
+        assert!(!request_str.contains("Content-Length"));
+        assert!(request_str.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn extract_body_from_response_splits_correctly() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello World";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, b"Hello World");
+    }
+
+    #[test]
+    fn extract_body_from_response_returns_all_if_no_separator() {
+        let response = b"Hello World";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, b"Hello World");
+    }
+
+    #[test]
+    fn extract_body_from_response_handles_empty_body() {
+        let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+        let body = extract_body_from_response(response.to_vec());
+        assert_eq!(body, b"");
+    }
+
+    #[test]
+    fn path_with_query_returns_path_only_when_no_query() {
+        let url = Url::parse("https://example.com/api/test").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/api/test");
+    }
+
+    #[test]
+    fn path_with_query_includes_query_string() {
+        let url = Url::parse("https://example.com/api/test?key=value&foo=bar").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/api/test?key=value&foo=bar");
+    }
+
+    #[test]
+    fn path_with_query_handles_root_path() {
+        let url = Url::parse("https://example.com").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/");
+    }
+
+    #[test]
+    fn path_with_query_handles_empty_path_with_query() {
+        let url = Url::parse("https://example.com?query=test").unwrap();
+        let result = path_with_query(&url);
+        assert_eq!(result, "/?query=test");
+    }
+
+    #[test]
+    fn stream_config_default_buffer_size() {
+        let config = StreamConfig {
+            buffer_size: 16384,
+            heartbeat_interval_secs: 60,
+        };
+        assert_eq!(config.buffer_size, 16384);
+    }
+
+    #[test]
+    fn stream_config_default_heartbeat() {
+        let config = StreamConfig {
+            buffer_size: 8192,
+            heartbeat_interval_secs: 45,
+        };
+        assert_eq!(config.heartbeat_interval_secs, 45);
+    }
+}

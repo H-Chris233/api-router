@@ -218,6 +218,9 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                         provider = crate::tracing_util::extract_provider(&config.base_url),
                         "Request completed successfully"
                     );
+                    let latency = start_time.elapsed().as_secs_f64();
+                    observe_request_latency(route_path, latency);
+                    record_request(route_path, "POST", 200);
                 }
                 Err(err) => {
                     span.record("status_code", 500);
@@ -225,17 +228,10 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;
+                    let latency = start_time.elapsed().as_secs_f64();
+                    observe_request_latency(route_path, latency);
+                    record_request(route_path, "POST", 500);
                 }
-            let latency = start_time.elapsed().as_secs_f64();
-            observe_request_latency(route_path, latency);
-
-            if let Err(err) = result {
-                let response = map_error_to_response(&err);
-                let _ = stream.write_all(&response).await;
-                let _ = stream.flush().await;
-                record_request(route_path, "POST", 500);
-            } else {
-                record_request(route_path, "POST", 200);
             }
         }
         _ => {

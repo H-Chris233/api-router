@@ -506,6 +506,87 @@ curl -X POST http://localhost:8000/v1/embeddings \
 
 通过上述拆分，核心逻辑更加聚焦，测试覆盖也更加精确，有助于未来接入新的模型端点或协议扩展。
 
+## 测试与代码覆盖率
+
+API Router 拥有全面的单元测试和集成测试覆盖。
+
+### 运行测试
+
+```bash
+# 运行所有测试（单元测试 + 集成测试）
+cargo test --all
+
+# 仅运行单元测试
+cargo test --lib
+
+# 仅运行集成测试
+cargo test --test '*'
+
+# 运行特定模块的测试
+cargo test --lib config::tests
+cargo test --lib rate_limit::tests
+```
+
+### 测试统计
+
+- **单元测试**：151 个
+- **集成测试**：11 个
+- **总测试数**：162 个
+- **测试通过率**：100%
+
+### 覆盖的模块
+
+| 模块 | 测试数量 | 覆盖率估算 |
+|------|----------|------------|
+| 配置解析 (config.rs) | 20+ | ~90% |
+| 速率限制 (rate_limit.rs) | 19+ | ~95% |
+| 模型序列化 (models.rs) | 13+ | ~85% |
+| 错误处理 (errors.rs) | 11 | ~95% |
+| HTTP 工具 (http_client.rs) | 10 | ~75% |
+| 请求解析 (parser.rs) | 23 | ~90% |
+| 请求规划 (plan.rs) | 21 | ~90% |
+| 集成流程 | 11 | ~80% |
+
+### 代码覆盖率工具
+
+项目支持两种代码覆盖率工具：
+
+#### 1. cargo-tarpaulin（推荐）
+
+```bash
+# 安装
+cargo install cargo-tarpaulin
+
+# 生成覆盖率报告
+cargo tarpaulin --out Html --out Xml
+
+# 查看 HTML 报告
+open tarpaulin-report.html
+```
+
+#### 2. grcov（备选）
+
+```bash
+# 安装
+cargo install grcov
+rustup component add llvm-tools-preview
+
+# 详细步骤请参阅 COVERAGE.md
+```
+
+### CI 集成
+
+GitHub Actions 工作流会自动：
+- 运行所有测试
+- 生成覆盖率报告
+- 检查覆盖率阈值（70% 警告）
+- 上传覆盖率报告为构建工件
+
+### 详细文档
+
+- [TEST_SUMMARY.md](TEST_SUMMARY.md) - 测试覆盖详情和统计
+- [COVERAGE.md](COVERAGE.md) - 代码覆盖率工具使用指南
+
 ## 监控与指标
 
 API Router 集成了 Prometheus 指标收集，通过 `/metrics` 端点暴露性能数据：

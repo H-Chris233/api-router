@@ -203,3 +203,254 @@ fn copy_header_if_present(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> ApiConfig {
+        ApiConfig {
+            base_url: "https://api.example.com".to_string(),
+            headers: HashMap::new(),
+            model_mapping: None,
+            endpoints: HashMap::new(),
+            port: 8000,
+            rate_limit: None,
+            stream_config: None,
+        }
+    }
+
+    fn mock_parsed_request(target: &str) -> ParsedRequest {
+        ParsedRequest::new_for_tests(
+            "POST",
+            target,
+            "HTTP/1.1",
+            HashMap::new(),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn map_model_name_uses_mapping() {
+        let mut config = base_config();
+        let mut mapping = HashMap::new();
+        mapping.insert("gpt-4".to_string(), "claude-3-opus".to_string());
+        mapping.insert("gpt-3.5".to_string(), "claude-3-sonnet".to_string());
+        config.model_mapping = Some(mapping);
+
+        assert_eq!(map_model_name(&config, "gpt-4"), "claude-3-opus");
+        assert_eq!(map_model_name(&config, "gpt-3.5"), "claude-3-sonnet");
+    }
+
+    #[test]
+    fn map_model_name_returns_original_when_not_mapped() {
+        let config = base_config();
+        assert_eq!(map_model_name(&config, "unknown-model"), "unknown-model");
+    }
+
+    #[test]
+    fn map_model_name_returns_original_when_no_mapping() {
+        let mut config = base_config();
+        let mapping = HashMap::new();
+        config.model_mapping = Some(mapping);
+        assert_eq!(map_model_name(&config, "any-model"), "any-model");
+    }
+
+    #[test]
+    fn normalized_base_url_trims_trailing_slash() {
+        let result = normalized_base_url("https://api.example.com/");
+        assert_eq!(result, "https://api.example.com");
+    }
+
+    #[test]
+    fn normalized_base_url_adds_https_prefix() {
+        let result = normalized_base_url("api.example.com");
+        assert_eq!(result, "https://api.example.com");
+    }
+
+    #[test]
+    fn normalized_base_url_preserves_http() {
+        let result = normalized_base_url("http://localhost:8080");
+        assert_eq!(result, "http://localhost:8080");
+    }
+
+    #[test]
+    fn normalized_base_url_handles_empty() {
+        let result = normalized_base_url("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn join_base_and_path_combines_correctly() {
+        let result = join_base_and_path("https://api.example.com", "/v1/chat");
+        assert_eq!(result, "https://api.example.com/v1/chat");
+    }
+
+    #[test]
+    fn join_base_and_path_handles_absolute_url_in_path() {
+        let result = join_base_and_path("https://api.example.com", "https://other.com/path");
+        assert_eq!(result, "https://other.com/path");
+    }
+
+    #[test]
+    fn join_base_and_path_handles_empty_base() {
+        let result = join_base_and_path("", "/v1/chat");
+        assert_eq!(result, "/v1/chat");
+    }
+
+    #[test]
+    fn join_base_and_path_handles_path_without_leading_slash() {
+        let result = join_base_and_path("https://api.example.com", "v1/chat");
+        assert_eq!(result, "https://api.example.com/v1/chat");
+    }
+
+    #[test]
+    fn join_base_and_path_handles_empty_path() {
+        let result = join_base_and_path("https://api.example.com", "");
+        assert_eq!(result, "https://api.example.com");
+    }
+
+    #[test]
+    fn compute_upstream_path_uses_override() {
+        let mut endpoint = EndpointConfig::default();
+        endpoint.upstream_path = Some("/v1/messages".to_string());
+        let result = compute_upstream_path("/v1/chat/completions", &endpoint);
+        assert_eq!(result, "/v1/messages");
+    }
+
+    #[test]
+    fn compute_upstream_path_preserves_query_string() {
+        let mut endpoint = EndpointConfig::default();
+        endpoint.upstream_path = Some("/v1/messages".to_string());
+        let result = compute_upstream_path("/v1/chat/completions?foo=bar&baz=qux", &endpoint);
+        assert_eq!(result, "/v1/messages?foo=bar&baz=qux");
+    }
+
+    #[test]
+    fn compute_upstream_path_merges_query_strings() {
+        let mut endpoint = EndpointConfig::default();
+        endpoint.upstream_path = Some("/v1/messages?api_version=2".to_string());
+        let result = compute_upstream_path("/v1/chat?user=test", &endpoint);
+        assert_eq!(result, "/v1/messages?api_version=2&user=test");
+    }
+
+    #[test]
+    fn compute_upstream_path_falls_back_to_request_target() {
+        let endpoint = EndpointConfig::default();
+        let result = compute_upstream_path("/v1/chat/completions", &endpoint);
+        assert_eq!(result, "/v1/chat/completions");
+    }
+
+    #[test]
+    fn compute_upstream_path_adds_leading_slash() {
+        let endpoint = EndpointConfig::default();
+        let result = compute_upstream_path("v1/chat", &endpoint);
+        assert_eq!(result, "/v1/chat");
+    }
+
+    #[test]
+    fn prepare_forward_plan_builds_full_url() {
+        let config = base_config();
+        let request = mock_parsed_request("/v1/chat");
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "test-key", None);
+        assert_eq!(plan.full_url(), "https://api.example.com/v1/chat");
+    }
+
+    #[test]
+    fn prepare_forward_plan_uses_endpoint_method() {
+        let mut config = base_config();
+        let mut endpoint = EndpointConfig::default();
+        endpoint.method = Some("PATCH".to_string());
+        config.endpoints.insert("/v1/test".to_string(), endpoint);
+        let request = mock_parsed_request("/v1/test");
+        let plan = prepare_forward_plan("/v1/test", &request, &config, "key", None);
+        assert_eq!(plan.method(), "PATCH");
+    }
+
+    #[test]
+    fn prepare_forward_plan_defaults_to_post() {
+        let config = base_config();
+        let request = mock_parsed_request("/v1/chat");
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "key", None);
+        assert_eq!(plan.method(), "POST");
+    }
+
+    #[test]
+    fn prepare_forward_plan_includes_authorization() {
+        let config = base_config();
+        let request = mock_parsed_request("/v1/chat");
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "my-api-key", None);
+        assert_eq!(plan.headers().get("Authorization"), Some(&"Bearer my-api-key".to_string()));
+    }
+
+    #[test]
+    fn prepare_forward_plan_merges_config_and_endpoint_headers() {
+        let mut config = base_config();
+        config.headers.insert("X-Global".to_string(), "global-value".to_string());
+        let mut endpoint = EndpointConfig::default();
+        endpoint.headers.insert("X-Endpoint".to_string(), "endpoint-value".to_string());
+        config.endpoints.insert("/v1/test".to_string(), endpoint);
+        let request = mock_parsed_request("/v1/test");
+        let plan = prepare_forward_plan("/v1/test", &request, &config, "key", None);
+        assert_eq!(plan.headers().get("X-Global"), Some(&"global-value".to_string()));
+        assert_eq!(plan.headers().get("X-Endpoint"), Some(&"endpoint-value".to_string()));
+    }
+
+    #[test]
+    fn prepare_forward_plan_includes_content_type() {
+        let config = base_config();
+        let request = mock_parsed_request("/v1/chat");
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "key", Some("application/json"));
+        assert_eq!(plan.headers().get("Content-Type"), Some(&"application/json".to_string()));
+    }
+
+    #[test]
+    fn prepare_forward_plan_copies_client_headers() {
+        let config = base_config();
+        let mut headers = HashMap::new();
+        headers.insert("accept".to_string(), "application/json".to_string());
+        headers.insert("user-agent".to_string(), "TestClient/1.0".to_string());
+        headers.insert("x-request-id".to_string(), "req-123".to_string());
+        let request = ParsedRequest::new_for_tests("POST", "/v1/chat", "HTTP/1.1", headers, vec![]);
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "key", None);
+        assert_eq!(plan.headers().get("Accept"), Some(&"application/json".to_string()));
+        assert_eq!(plan.headers().get("User-Agent"), Some(&"TestClient/1.0".to_string()));
+        assert_eq!(plan.headers().get("x-request-id"), Some(&"req-123".to_string()));
+    }
+
+    #[test]
+    fn prepare_forward_plan_preserves_client_authorization() {
+        let config = base_config();
+        let mut headers = HashMap::new();
+        headers.insert("authorization".to_string(), "Bearer client-key".to_string());
+        let request = ParsedRequest::new_for_tests("POST", "/v1/chat", "HTTP/1.1", headers, vec![]);
+        let plan = prepare_forward_plan("/v1/chat", &request, &config, "default-key", None);
+        assert_eq!(plan.headers().get("Authorization"), Some(&"Bearer client-key".to_string()));
+    }
+
+    #[test]
+    fn has_header_case_insensitive_works() {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("authorization".to_string(), "Bearer token".to_string());
+        assert!(has_header_case_insensitive(&headers, "content-type"));
+        assert!(has_header_case_insensitive(&headers, "AUTHORIZATION"));
+        assert!(has_header_case_insensitive(&headers, "Content-Type"));
+        assert!(!has_header_case_insensitive(&headers, "Accept"));
+    }
+
+    #[test]
+    fn forward_plan_accessors_work() {
+        let plan = ForwardPlan {
+            method: "POST".to_string(),
+            headers: HashMap::new(),
+            base_url: "https://api.test".to_string(),
+            path: "/v1/chat".to_string(),
+            stream_config: None,
+        };
+        assert_eq!(plan.method(), "POST");
+        assert_eq!(plan.base_url(), "https://api.test");
+        assert_eq!(plan.path(), "/v1/chat");
+        assert!(plan.stream_config().is_none());
+    }
+}
