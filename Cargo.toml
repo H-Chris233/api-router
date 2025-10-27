@@ -29,6 +29,7 @@ prometheus = { version = "0.13", default-features = false }
 lazy_static = "1.4"
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "rustls"] }
 sentry-tracing = "0.34"
+async-channel = "2"
 
 [dev-dependencies]
 serial_test = "3.2.0"
