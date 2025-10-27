@@ -1,10 +1,11 @@
 use crate::config::load_api_config;
+use crate::error_tracking::capture_error_with_context;
 use crate::metrics::{
     gather_metrics, observe_request_latency, record_request, update_rate_limiter_buckets,
     ConnectionGuard,
 };
 use crate::rate_limit::{resolve_rate_limit_settings, RateLimitDecision, RATE_LIMITER};
-use crate::tracing_util::{elapsed_ms, generate_request_id};
+use crate::tracing_util::{elapsed_ms, extract_provider, generate_request_id};
 use serde_json::json;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use smol::net::TcpStream;
@@ -159,6 +160,10 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                 Err(err) => {
                     span.record("status_code", 500);
                     span.record("latency_ms", elapsed_ms(request_start));
+                    
+                    // Capture error with Sentry
+                    capture_error_with_context(&err, &request_id, "unknown", route_path, None);
+                    
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;
@@ -225,6 +230,17 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                 Err(err) => {
                     span.record("status_code", 500);
                     span.record("latency_ms", elapsed_ms(request_start));
+                    
+                    // Capture error with Sentry with full context
+                    let provider = extract_provider(&config.base_url);
+                    capture_error_with_context(
+                        &err,
+                        &request_id,
+                        &client_api_key,
+                        route_path,
+                        Some(&provider),
+                    );
+                    
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;

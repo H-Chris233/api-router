@@ -1,4 +1,5 @@
 pub mod config;
+pub mod error_tracking;
 pub mod errors;
 pub mod handlers;
 pub mod http_client;
