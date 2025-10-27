@@ -24,6 +24,11 @@
 - 动态加载 transformer 目录中的 JSON 配置文件
 - 支持基于 API Key 与路由粒度的令牌桶限流，超限时返回 429 并暴露健康指标
 - **Prometheus 指标集成**：通过 `/metrics` 端点暴露请求计数、延迟分布、活跃连接数、上游错误等指标，便于监控和告警
+- **Sentry 错误追踪与告警**（可选）：
+  - 自动捕获未处理错误和高严重级别日志
+  - 上报带有请求上下文的错误（request ID、API key、上游信息）
+  - 检测重复的上游故障并发送告警
+  - 通过环境变量配置，未配置时零开销
 
 ## 安装与运行
 
@@ -61,6 +66,8 @@
 **监控与指标**：
 - `prometheus` (v0.13, 无默认特性) - Prometheus 指标收集
 - `lazy_static` (v1.4) - 静态变量初始化，用于全局指标注册
+- `sentry` (v0.34, features: backtrace, contexts, panic, rustls) - 可选错误追踪
+- `sentry-tracing` (v0.34) - Sentry 与 tracing 集成
 
 **已移除的冗余依赖**：
 - ~~`async-channel`~~ - 未使用
@@ -235,6 +242,35 @@ export RUST_LOG=api_router=debug,hyper=warn
 
 详细的日志配置文档请参阅 [TRACING.md](TRACING.md)。
 
+#### 错误追踪与告警配置（Sentry）
+
+API Router 支持可选的 Sentry 集成，用于集中式错误追踪与告警：
+
+```bash
+# 启用 Sentry（需要 Sentry 账户和项目 DSN）
+export SENTRY_DSN="https://your-key@o1234567.ingest.sentry.io/9876543"
+export SENTRY_SAMPLE_RATE="1.0"        # 采样率：0.0-1.0，默认 1.0
+export SENTRY_ENVIRONMENT="production" # 环境标签，默认 production
+
+# 启动服务
+cargo run
+```
+
+**功能特性**：
+- **自动错误捕获**：上报所有未处理错误到 Sentry，包含完整堆栈跟踪
+- **丰富上下文**：每个错误附带 request ID、路由、匿名化的 API key、上游提供商信息
+- **重复故障告警**：自动检测重复的上游故障（5 分钟内 5 次失败），触发告警事件
+- **零开销**：未配置 `SENTRY_DSN` 时完全禁用，无性能影响
+- **错误分级**：根据错误类型自动设置严重级别（Error、Warning、Info）
+
+**禁用 Sentry**：
+```bash
+unset SENTRY_DSN
+cargo run
+# 输出: Sentry error tracking is disabled (no SENTRY_DSN configured)
+```
+
+详细的配置、告警设置和故障排除请参阅 [SENTRY.md](SENTRY.md)。
 
 #### 限流配置
 

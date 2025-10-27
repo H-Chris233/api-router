@@ -7,3 +7,5 @@ Cargo.lock
 *.swo
 .vscode/
 .idea/
+.env
+.env.local

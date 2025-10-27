@@ -1,4 +1,5 @@
 use crate::config::ApiConfig;
+use crate::error_tracking::track_upstream_failure;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::metrics::record_upstream_error;
@@ -95,6 +96,12 @@ pub(super) async fn handle_route(
             RouterError::BadRequest(_) => "bad_request",
         };
         record_upstream_error(error_type);
+        
+        // Track upstream failures for alerting
+        if matches!(err, RouterError::Upstream(_) | RouterError::Tls(_)) {
+            let provider = extract_provider(&config.base_url);
+            track_upstream_failure(&provider, err);
+        }
     }
 
     result
