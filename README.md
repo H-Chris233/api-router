@@ -30,6 +30,34 @@
   - 检测重复的上游故障并发送告警
   - 通过环境变量配置，未配置时零开销
 
+## 快速上手
+
+1. 克隆仓库并进入目录；
+2. 根据需要设置默认 API Key（也可以通过传入 `Authorization` 头覆盖）；
+3. 启动代理服务，选择目标 transformer 配置；
+4. 通过健康检查与指标端点确认服务状态。
+
+```bash
+git clone <repository-url>
+cd api-router
+export DEFAULT_API_KEY="your-api-key"
+cargo run -- qwen 8000
+curl http://localhost:8000/health
+curl http://localhost:8000/metrics | head -n 20
+```
+
+## OpenAPI 文档
+
+- `docs/openapi.yaml`：覆盖所有受支持端点、请求/响应模式、错误结构与必需头部；
+- `docs/render_openapi.sh`：通过 Redoc CLI 生成可发布的 HTML 文档（默认输出 `docs/openapi.html`）；
+- 也可以将该 YAML 导入 Swagger UI、Stoplight 等接口管理工具。
+
+```bash
+./docs/render_openapi.sh
+```
+
+> 提示：脚本依赖 `npx @redocly/cli@latest`，请先安装 Node.js 或确保 `npx` 可用。
+
 ## 安装与运行
 
 ### 依赖
@@ -130,6 +158,44 @@ API Router 通过 `transformer/*.json` 文件动态加载配置，支持：
 - 模型名称映射 (`modelMapping`)
 - 令牌桶限流策略（全局 `rateLimit` 与端点覆盖）
 - 自定义监听端口 (`port`)
+
+### transformer 配置字段一览
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `baseUrl` | `string` | **必填**。上游提供商的基础 URL（包含协议和主机）。 |
+| `headers` | `object<string,string>` | 转发到上游时默认附带的请求头，将与客户端请求头合并。 |
+| `modelMapping` | `object<string,string>` | 客户端模型名称到上游真实模型名称的映射。未命中时保持原值。 |
+| `endpoints` | `object<string, EndpointConfig>` | 针对每个代理端点的细粒度覆盖配置，键为本地路由路径。 |
+| `rateLimit` | `RateLimitConfig` | 设置全局默认令牌桶限流配置，可被端点覆盖或环境变量覆盖。 |
+| `streamConfig` | `StreamConfig` | 配置全局流式传输默认参数（缓冲区、心跳间隔）。 |
+| `port` | `number` | 本地监听端口，默认 `8000`。 |
+
+### EndpointConfig 字段
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `upstreamPath` | `string` | （可选）重写上游请求路径，可携带查询参数。 |
+| `method` | `string` | （可选）覆写默认 HTTP 方法，默认沿用客户端方法。 |
+| `headers` | `object<string,string>` | 仅对该端点追加的上游请求头。 |
+| `streamSupport` | `boolean` | 声明该端点支持 SSE/流式转发（`stream=true` 时启用）。 |
+| `requiresMultipart` | `boolean` | 指示请求正文是否为 `multipart/form-data`，用于音频上传。 |
+| `rateLimit` | `RateLimitConfig` | 端点级令牌桶配置，优先级高于全局设置。 |
+| `streamConfig` | `StreamConfig` | 端点级流式配置，优先级高于全局设置。 |
+
+### RateLimitConfig 字段
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `requestsPerMinute` | `number` | 每分钟允许的最大请求数，设置为 `0` 表示不限制。 |
+| `burst` | `number` | 允许的瞬时突发容量，默认为 `requestsPerMinute`。 |
+
+### StreamConfig 字段
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `bufferSize` | `number` | 单次写入的缓冲区大小（字节），默认为 `8192`。 |
+| `heartbeatIntervalSecs` | `number` | 心跳事件间隔（秒），默认为 `30`。 |
 
 ### 配置示例
 
@@ -281,7 +347,7 @@ cargo run
 
 #### 配置缓存与热加载
 
-- 配置文件通过 `OnceLock + RwLock` 缓存，首次请求后会常驻内存，避免重复 I/O 与 JSON 解析开销。
+- 配置文件通过 `CONFIG_CACHE`（`OnceLock<RwLock<ConfigCache>>`）缓存，首次请求后会常驻内存，避免重复 I/O 与 JSON 解析开销。
 - 每次获取配置时都会检查目标文件的修改时间，只要检测到变更就会自动重新读取并刷新缓存，无需重启进程。
 - 通过修改或执行 `touch transformer/<name>.json` 即可触发热加载；在自定义目录下的配置同样适用。
 - 设置环境变量 `API_ROUTER_CONFIG_PATH=/path/to/config.json` 可以将配置文件移动到 `transformer/` 目录之外，便于挂载外部卷或在测试中使用临时文件。
@@ -301,6 +367,45 @@ cargo run
 | POST | `/v1/messages` | Anthropic Messages API 代理，支持流式 |
 
 ## 使用示例
+
+### 健康检查
+```bash
+curl http://localhost:8000/health | jq
+```
+示例响应：
+```json
+{
+  "status": "ok",
+  "message": "Light API Router running",
+  "rateLimiter": {
+    "activeBuckets": 0,
+    "routes": {}
+  }
+}
+```
+
+### Prometheus 指标拉取
+```bash
+curl http://localhost:8000/metrics | head -n 10
+```
+
+### 速率限制响应格式
+```bash
+curl -i -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-coder-plus",
+    "messages": [{"role": "user", "content": "ping"}],
+    "stream": false
+  }'
+```
+连续请求超过配额后，将返回：
+```
+HTTP/1.1 429 TOO MANY REQUESTS
+Retry-After: 2
+{"error":{"message":"Rate limit exceeded"}}
+```
 
 ### Chat Completions（非流式）
 ```bash
@@ -622,6 +727,16 @@ GitHub Actions 工作流会自动：
 
 - [TEST_SUMMARY.md](TEST_SUMMARY.md) - 测试覆盖详情和统计
 - [COVERAGE.md](COVERAGE.md) - 代码覆盖率工具使用指南
+
+## 运维指南
+
+- **健康探针**：将 `/health` 暴露给负载均衡器或 Kubernetes 探针，非 200 响应需立即排查。该端点还会返回活跃令牌桶数量，便于判断是否出现热点 API key。
+- **指标收集**：通过 `/metrics` 以 Prometheus 格式导出请求量、延迟、连接数与限流情况，可直接接入 Prometheus/Grafana。
+- **限流调优**：结合 `/health` 中的 `rateLimiter.routes` 与 Prometheus 中的 `rate_limiter_buckets` 指标，动态调整配置文件或环境变量中的 `requestsPerMinute`、`burst`。
+- **配置热更新**：编辑 `transformer/<name>.json` 后执行 `touch` 即可生效；若部署在容器或挂载卷中，可设置 `API_ROUTER_CONFIG_PATH` 指向实际路径。
+- **日志与追踪**：通过 `RUST_LOG`、`LOG_FORMAT` 控制日志级别与格式，建议在生产环境启用 JSON 并将 `request_id` 注入下游系统。
+- **错误告警**：配置 `SENTRY_DSN`、`SENTRY_ENVIRONMENT` 等环境变量即可自动捕获未处理错误，并保留请求上下文信息。
+- **文档发布**：使用 `./docs/render_openapi.sh` 生成 HTML 文档后，可将 `docs/openapi.html` 上传至内部文档站点或对象存储。
 
 ## 监控与指标
 
