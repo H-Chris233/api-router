@@ -38,8 +38,8 @@ impl SentryConfig {
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
 
-        let environment = env::var("SENTRY_ENVIRONMENT")
-            .unwrap_or_else(|_| "production".to_string());
+        let environment =
+            env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".to_string());
 
         SentryConfig {
             dsn,
@@ -141,7 +141,7 @@ pub fn capture_error_with_context(
 
 pub fn track_upstream_failure(provider: &str, error: &RouterError) {
     let key = provider.to_string();
-    
+
     let should_alert = UPSTREAM_FAILURE_TRACKER
         .entry(key.clone())
         .or_insert_with(|| UpstreamFailureInfo {
@@ -220,10 +220,8 @@ fn alert_repeated_upstream_failures(provider: &str, error: &RouterError) {
 
 fn cleanup_old_failure_trackers() {
     let cutoff = Instant::now() - Duration::from_secs(UPSTREAM_FAILURE_WINDOW_SECS * 2);
-    
-    UPSTREAM_FAILURE_TRACKER.retain(|_, info| {
-        info.first_failure > cutoff
-    });
+
+    UPSTREAM_FAILURE_TRACKER.retain(|_, info| info.first_failure > cutoff);
 }
 
 fn error_type_tag(error: &RouterError) -> &'static str {

@@ -109,7 +109,8 @@ impl MockProvider {
 
     fn start(responses: HashMap<String, MockResponse>) -> Self {
         let port = pick_free_port();
-        let listener = TcpListener::bind(("127.0.0.1", port)).expect("failed to bind mock provider port");
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).expect("failed to bind mock provider port");
         listener
             .set_nonblocking(true)
             .expect("failed to configure listener");
@@ -122,7 +123,9 @@ impl MockProvider {
         let responses_clone = Arc::clone(&responses);
         let shutdown_clone = Arc::clone(&shutdown);
 
-        let thread = thread::spawn(move || run_server(listener, requests_clone, responses_clone, shutdown_clone));
+        let thread = thread::spawn(move || {
+            run_server(listener, requests_clone, responses_clone, shutdown_clone)
+        });
 
         Self {
             port,
@@ -227,9 +230,7 @@ fn read_request(stream: &mut TcpStream) -> Option<RecordedRequest> {
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
 fn parse_content_length(headers: &[u8]) -> Option<usize> {

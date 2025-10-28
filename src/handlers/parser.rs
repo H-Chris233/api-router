@@ -192,7 +192,8 @@ mod tests {
 
     #[test]
     fn parse_http_request_normalizes_header_names() {
-        let raw = b"GET / HTTP/1.1\r\nContent-Type: text/plain\r\nAuthorization: Bearer token\r\n\r\n";
+        let raw =
+            b"GET / HTTP/1.1\r\nContent-Type: text/plain\r\nAuthorization: Bearer token\r\n\r\n";
         let parsed = parse_http_request(raw).unwrap();
         assert_eq!(parsed.header("content-type"), Some("text/plain"));
         assert_eq!(parsed.header("authorization"), Some("Bearer token"));
@@ -229,13 +230,8 @@ mod tests {
 
     #[test]
     fn route_path_returns_full_path_when_no_query() {
-        let parsed = ParsedRequest::new_for_tests(
-            "GET",
-            "/v1/models",
-            "HTTP/1.1",
-            HashMap::new(),
-            vec![],
-        );
+        let parsed =
+            ParsedRequest::new_for_tests("GET", "/v1/models", "HTTP/1.1", HashMap::new(), vec![]);
         assert_eq!(parsed.route_path(), "/v1/models");
     }
 
@@ -293,7 +289,10 @@ mod tests {
     #[test]
     fn extract_client_api_key_parses_bearer_token() {
         let mut headers = HashMap::new();
-        headers.insert("authorization".to_string(), "Bearer client-key-xyz".to_string());
+        headers.insert(
+            "authorization".to_string(),
+            "Bearer client-key-xyz".to_string(),
+        );
         let key = extract_client_api_key(&headers, "fallback");
         assert_eq!(key, "client-key-xyz");
     }
@@ -308,7 +307,10 @@ mod tests {
     #[test]
     fn extract_client_api_key_uses_raw_value_if_not_bearer() {
         let mut headers = HashMap::new();
-        headers.insert("authorization".to_string(), "ApiKey raw-key-value".to_string());
+        headers.insert(
+            "authorization".to_string(),
+            "ApiKey raw-key-value".to_string(),
+        );
         let key = extract_client_api_key(&headers, "fallback");
         assert_eq!(key, "ApiKey raw-key-value");
     }

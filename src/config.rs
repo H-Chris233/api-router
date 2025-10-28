@@ -1,6 +1,5 @@
 use crate::errors::{RouterError, RouterResult};
 use serde::Deserialize;
-use tracing::{debug, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -8,6 +7,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::SystemTime;
+use tracing::{debug, warn};
 
 const FALLBACK_CONFIG_PATH: &str = "./transformer/qwen.json";
 const CONFIG_BUFFER_SIZE: usize = 128 * 1024;
@@ -43,7 +43,10 @@ pub struct RateLimitConfig {
 pub struct StreamConfig {
     #[serde(rename = "bufferSize", default = "default_buffer_size")]
     pub buffer_size: usize,
-    #[serde(rename = "heartbeatIntervalSecs", default = "default_heartbeat_interval")]
+    #[serde(
+        rename = "heartbeatIntervalSecs",
+        default = "default_heartbeat_interval"
+    )]
     pub heartbeat_interval_secs: u64,
 }
 
@@ -155,27 +158,19 @@ fn needs_reload(entry: &CachedConfig, paths: &ConfigPaths) -> bool {
 
 fn read_config_from_path(path: &Path) -> RouterResult<(ApiConfig, Option<SystemTime>)> {
     let file = File::open(path).map_err(|e| {
-        RouterError::ConfigRead(format!(
-            "failed to open {}: {}",
-            path.display(),
-            e
-        ))
+        RouterError::ConfigRead(format!("failed to open {}: {}", path.display(), e))
     })?;
     let modified = file.metadata().ok().and_then(|meta| meta.modified().ok());
     let mut reader = BufReader::with_capacity(CONFIG_BUFFER_SIZE, file);
-    let config: ApiConfig = serde_json::from_reader(&mut reader).map_err(|e| {
-        RouterError::ConfigParse(format!("{}: {}", path.display(), e))
-    })?;
+    let config: ApiConfig = serde_json::from_reader(&mut reader)
+        .map_err(|e| RouterError::ConfigParse(format!("{}: {}", path.display(), e)))?;
     Ok((config, modified))
 }
 
 fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
     match read_config_from_path(&paths.primary) {
         Ok((config, modified)) => {
-            debug!(
-                "loaded API config from {}",
-                paths.primary.display()
-            );
+            debug!("loaded API config from {}", paths.primary.display());
             Ok(CachedConfig {
                 config: Arc::new(config),
                 source: paths.primary.clone(),
@@ -185,11 +180,7 @@ fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
         Err(err) => match err {
             RouterError::ConfigParse(_) => Err(err),
             RouterError::ConfigRead(msg) => {
-                warn!(
-                    "{}; falling back to {}",
-                    msg,
-                    paths.fallback.display()
-                );
+                warn!("{}; falling back to {}", msg, paths.fallback.display());
                 let (config, modified) = read_config_from_path(&paths.fallback)?;
                 Ok(CachedConfig {
                     config: Arc::new(config),
@@ -210,10 +201,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
         let guard = cache.read().expect("config cache poisoned");
         if let Some(entry) = &guard.entry {
             if !needs_reload(entry, &paths) {
-                debug!(
-                    "using cached API config from {}",
-                    entry.source.display()
-                );
+                debug!("using cached API config from {}", entry.source.display());
                 return Ok(entry.config.clone());
             }
         }
@@ -222,10 +210,7 @@ pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
     let mut guard = cache.write().expect("config cache poisoned");
     if let Some(entry) = &guard.entry {
         if !needs_reload(entry, &paths) {
-            debug!(
-                "using cached API config from {}",
-                entry.source.display()
-            );
+            debug!("using cached API config from {}", entry.source.display());
             return Ok(entry.config.clone());
         }
     }
@@ -439,7 +424,10 @@ mod tests {
         .unwrap();
         assert_eq!(config.upstream_path, Some("/v1/messages".to_string()));
         assert_eq!(config.method, Some("POST".to_string()));
-        assert_eq!(config.headers.get("X-API-Version"), Some(&"2023".to_string()));
+        assert_eq!(
+            config.headers.get("X-API-Version"),
+            Some(&"2023".to_string())
+        );
         assert!(config.stream_support);
         assert!(!config.requires_multipart);
         assert!(config.rate_limit.is_some());

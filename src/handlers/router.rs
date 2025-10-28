@@ -123,7 +123,12 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
             update_rate_limiter_buckets(snapshot.active_buckets);
             match gather_metrics() {
                 Ok(metrics_output) => {
-                    let _ = write_success(&mut stream, "text/plain; version=0.0.4", metrics_output.as_bytes()).await;
+                    let _ = write_success(
+                        &mut stream,
+                        "text/plain; version=0.0.4",
+                        metrics_output.as_bytes(),
+                    )
+                    .await;
                     let latency = start_time.elapsed().as_secs_f64();
                     observe_request_latency("/metrics", latency);
                     record_request("/metrics", "GET", 200);
@@ -160,10 +165,10 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                 Err(err) => {
                     span.record("status_code", 500);
                     span.record("latency_ms", elapsed_ms(request_start));
-                    
+
                     // Capture error with Sentry
                     capture_error_with_context(&err, &request_id, "unknown", route_path, None);
-                    
+
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;
@@ -230,7 +235,7 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                 Err(err) => {
                     span.record("status_code", 500);
                     span.record("latency_ms", elapsed_ms(request_start));
-                    
+
                     // Capture error with Sentry with full context
                     let provider = extract_provider(&config.base_url);
                     capture_error_with_context(
@@ -240,7 +245,7 @@ pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
                         route_path,
                         Some(&provider),
                     );
-                    
+
                     let response = map_error_to_response(&err);
                     let _ = stream.write_all(&response).await;
                     let _ = stream.flush().await;

@@ -81,8 +81,8 @@ impl TempConfigFile {
     }
 
     pub fn rewrite(&self, value: &Value) {
-        let contents = serde_json::to_string_pretty(value)
-            .expect("failed to serialize config fixture");
+        let contents =
+            serde_json::to_string_pretty(value).expect("failed to serialize config fixture");
         fs::write(self.file.path(), contents).expect("failed to overwrite config fixture");
     }
 }

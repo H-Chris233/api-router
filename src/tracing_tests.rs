@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::tracing_util::{generate_request_id, extract_provider, elapsed_ms};
+    use crate::tracing_util::{elapsed_ms, extract_provider, generate_request_id};
     use std::time::Instant;
     use tracing::{info, warn};
     use tracing_subscriber::prelude::*;
@@ -9,18 +9,27 @@ mod tests {
     fn test_request_id_generation_is_unique() {
         let id1 = generate_request_id();
         let id2 = generate_request_id();
-        
+
         assert_ne!(id1, id2, "Request IDs should be unique");
         assert_eq!(id1.len(), 36, "Request ID should be UUID format");
     }
 
     #[test]
     fn test_provider_extraction() {
-        assert_eq!(extract_provider("https://dashscope.aliyuncs.com/api/v1"), "qwen");
+        assert_eq!(
+            extract_provider("https://dashscope.aliyuncs.com/api/v1"),
+            "qwen"
+        );
         assert_eq!(extract_provider("https://api.openai.com/v1"), "openai");
-        assert_eq!(extract_provider("https://api.anthropic.com/v1"), "anthropic");
+        assert_eq!(
+            extract_provider("https://api.anthropic.com/v1"),
+            "anthropic"
+        );
         assert_eq!(extract_provider("https://api.cohere.com/v1"), "cohere");
-        assert_eq!(extract_provider("https://generativelanguage.googleapis.com/v1"), "gemini");
+        assert_eq!(
+            extract_provider("https://generativelanguage.googleapis.com/v1"),
+            "gemini"
+        );
         assert_eq!(extract_provider("https://unknown-provider.com"), "unknown");
     }
 
@@ -29,7 +38,7 @@ mod tests {
         let start = Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let latency = elapsed_ms(start);
-        
+
         assert!(latency >= 10.0, "Latency should be at least 10ms");
         assert!(latency < 100.0, "Latency should be less than 100ms");
     }
@@ -39,7 +48,7 @@ mod tests {
     fn test_span_creation_with_fields() {
         let request_id = generate_request_id();
         let client_ip = "192.168.1.1";
-        
+
         let span = tracing::info_span!(
             "http_request",
             request_id = %request_id,
@@ -47,7 +56,7 @@ mod tests {
             method = "POST",
             route = "/v1/chat/completions",
         );
-        
+
         let _enter = span.enter();
         info!("Test log message");
     }
@@ -56,25 +65,25 @@ mod tests {
     #[tracing_test::traced_test]
     fn test_nested_spans_for_upstream_tracking() {
         let request_id = generate_request_id();
-        
+
         let parent_span = tracing::info_span!(
             "http_request",
             request_id = %request_id,
             route = "/v1/chat/completions",
         );
-        
+
         let _parent_enter = parent_span.enter();
-        
+
         let upstream_span = tracing::debug_span!(
             "upstream_request",
             request_id = %request_id,
             provider = "qwen",
             upstream_latency_ms = tracing::field::Empty,
         );
-        
+
         let _upstream_enter = upstream_span.enter();
         upstream_span.record("upstream_latency_ms", 125.5);
-        
+
         tracing::debug!("Upstream request completed");
     }
 
@@ -94,7 +103,7 @@ mod tests {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::EnvFilter::new("info"))
             .with(tracing_subscriber::fmt::layer().json());
-        
+
         // Just verify we can construct it
         drop(subscriber);
     }
@@ -105,7 +114,7 @@ mod tests {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::EnvFilter::new("debug"))
             .with(tracing_subscriber::fmt::layer());
-        
+
         // Just verify we can construct it
         drop(subscriber);
     }
@@ -120,7 +129,11 @@ mod tests {
     #[test]
     #[tracing_test::traced_test]
     fn test_warning_logs_for_rate_limiting() {
-        warn!(client = "test***ab", retry_after = 60, "Rate limit exceeded");
+        warn!(
+            client = "test***ab",
+            retry_after = 60,
+            "Rate limit exceeded"
+        );
         // Verify test doesn't panic - actual log capture is tested by tracing_test
     }
 

@@ -48,13 +48,19 @@ mod tests {
     #[test]
     fn upstream_error_displays_correctly() {
         let error = RouterError::Upstream("500 Internal Server Error".to_string());
-        assert_eq!(format!("{}", error), "Upstream error: 500 Internal Server Error");
+        assert_eq!(
+            format!("{}", error),
+            "Upstream error: 500 Internal Server Error"
+        );
     }
 
     #[test]
     fn tls_error_displays_correctly() {
         let error = RouterError::Tls("certificate validation failed".to_string());
-        assert_eq!(format!("{}", error), "TLS error: certificate validation failed");
+        assert_eq!(
+            format!("{}", error),
+            "TLS error: certificate validation failed"
+        );
     }
 
     #[test]

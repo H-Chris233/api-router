@@ -63,9 +63,7 @@ pub fn record_request(route: &str, method: &str, status: u16) {
 }
 
 pub fn record_upstream_error(error_type: &str) {
-    UPSTREAM_ERRORS_TOTAL
-        .with_label_values(&[error_type])
-        .inc();
+    UPSTREAM_ERRORS_TOTAL.with_label_values(&[error_type]).inc();
 }
 
 pub fn observe_request_latency(route: &str, latency_seconds: f64) {
@@ -98,7 +96,7 @@ mod tests {
         record_upstream_error("test_error");
         observe_request_latency("/test", 0.1);
         update_rate_limiter_buckets(5);
-        
+
         let metrics_output = gather_metrics().expect("should gather metrics");
 
         assert!(metrics_output.contains("requests_total"));

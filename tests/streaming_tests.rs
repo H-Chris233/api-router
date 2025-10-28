@@ -267,8 +267,7 @@ fn streaming_supports_endpoint_specific_config() {
                 vec![("Content-Type", "text/event-stream")],
                 vec![
                     StreamChunk::new(b"data: {\"delta\":\"test\"}\n\n"),
-                    StreamChunk::new(b"data: [DONE]\n\n")
-                        .with_delay(Duration::from_millis(2500)),
+                    StreamChunk::new(b"data: [DONE]\n\n").with_delay(Duration::from_millis(2500)),
                 ],
             ),
         )

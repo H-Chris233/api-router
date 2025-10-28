@@ -3,7 +3,9 @@ use crate::error_tracking::track_upstream_failure;
 use crate::errors::{RouterError, RouterResult};
 use crate::http_client::{handle_streaming_request, send_http_request};
 use crate::metrics::record_upstream_error;
-use crate::models::{ChatCompletionRequest, CompletionRequest, EmbeddingRequest, AnthropicMessagesRequest};
+use crate::models::{
+    AnthropicMessagesRequest, ChatCompletionRequest, CompletionRequest, EmbeddingRequest,
+};
 use crate::tracing_util::{elapsed_ms, extract_provider};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -66,7 +68,15 @@ pub(super) async fn handle_route(
             .await
         }
         "/v1/audio/transcriptions" | "/v1/audio/translations" => {
-            forward_multipart_route(route_path, request, stream, config, default_api_key, request_id).await
+            forward_multipart_route(
+                route_path,
+                request,
+                stream,
+                config,
+                default_api_key,
+                request_id,
+            )
+            .await
         }
         "/v1/messages" => {
             forward_json_route::<AnthropicMessagesRequest>(
@@ -96,7 +106,7 @@ pub(super) async fn handle_route(
             RouterError::BadRequest(_) => "bad_request",
         };
         record_upstream_error(error_type);
-        
+
         // Track upstream failures for alerting
         if matches!(err, RouterError::Upstream(_) | RouterError::Tls(_)) {
             let provider = extract_provider(&config.base_url);
@@ -122,7 +132,7 @@ where
 {
     let upstream_start = Instant::now();
     let provider = extract_provider(&config.base_url);
-    
+
     let span = tracing::debug_span!(
         "upstream_request",
         request_id = %request_id,
@@ -164,11 +174,15 @@ where
         )
         .await?;
         span.record("upstream_latency_ms", elapsed_ms(upstream_start));
-        debug!(upstream_latency_ms = elapsed_ms(upstream_start), "Streaming request completed");
+        debug!(
+            upstream_latency_ms = elapsed_ms(upstream_start),
+            "Streaming request completed"
+        );
     } else {
         let full_url = plan.full_url();
         let response_body =
-            forward_to_upstream(&full_url, plan.method(), plan.headers(), Some(&body_bytes)).await?;
+            forward_to_upstream(&full_url, plan.method(), plan.headers(), Some(&body_bytes))
+                .await?;
         span.record("upstream_latency_ms", elapsed_ms(upstream_start));
         debug!(
             upstream_latency_ms = elapsed_ms(upstream_start),
@@ -191,7 +205,7 @@ async fn forward_multipart_route(
 ) -> RouterResult<()> {
     let upstream_start = Instant::now();
     let provider = extract_provider(&config.base_url);
-    
+
     let span = tracing::debug_span!(
         "upstream_multipart_request",
         request_id = %request_id,

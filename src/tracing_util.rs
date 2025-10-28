@@ -46,26 +46,17 @@ mod tests {
             extract_provider("https://dashscope.aliyuncs.com/api/v1"),
             "qwen"
         );
-        assert_eq!(
-            extract_provider("https://api.openai.com/v1"),
-            "openai"
-        );
+        assert_eq!(extract_provider("https://api.openai.com/v1"), "openai");
         assert_eq!(
             extract_provider("https://api.anthropic.com/v1"),
             "anthropic"
         );
-        assert_eq!(
-            extract_provider("https://api.cohere.com/v1"),
-            "cohere"
-        );
+        assert_eq!(extract_provider("https://api.cohere.com/v1"), "cohere");
         assert_eq!(
             extract_provider("https://generativelanguage.googleapis.com/v1"),
             "gemini"
         );
-        assert_eq!(
-            extract_provider("https://custom-provider.com"),
-            "unknown"
-        );
+        assert_eq!(extract_provider("https://custom-provider.com"), "unknown");
     }
 
     #[test]

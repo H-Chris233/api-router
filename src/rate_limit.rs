@@ -394,12 +394,18 @@ mod tests {
     fn rate_limit_decision_equality() {
         assert_eq!(RateLimitDecision::Allowed, RateLimitDecision::Allowed);
         assert_eq!(
-            RateLimitDecision::Limited { retry_after_seconds: 10 },
-            RateLimitDecision::Limited { retry_after_seconds: 10 }
+            RateLimitDecision::Limited {
+                retry_after_seconds: 10
+            },
+            RateLimitDecision::Limited {
+                retry_after_seconds: 10
+            }
         );
         assert_ne!(
             RateLimitDecision::Allowed,
-            RateLimitDecision::Limited { retry_after_seconds: 1 }
+            RateLimitDecision::Limited {
+                retry_after_seconds: 1
+            }
         );
     }
 

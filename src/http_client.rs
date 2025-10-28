@@ -1,6 +1,6 @@
-use crate::errors::{RouterError, RouterResult};
 use crate::config::StreamConfig;
-use async_channel::{Sender, Receiver, bounded};
+use crate::errors::{RouterError, RouterResult};
+use async_channel::{bounded, Receiver, Sender};
 use async_tls::TlsConnector;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -9,7 +9,7 @@ use smol::net::TcpStream;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, warn, trace};
+use tracing::{debug, trace, warn};
 use url::Url;
 
 const DEFAULT_POOL_MAX_SIZE: usize = 10;
@@ -29,11 +29,9 @@ impl ConnectionKey {
             .host_str()
             .ok_or_else(|| RouterError::Url("Invalid URL: missing host".to_string()))?
             .to_string();
-        let port = url.port_or_known_default().unwrap_or(if scheme == "https" {
-            443
-        } else {
-            80
-        });
+        let port = url
+            .port_or_known_default()
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
         Ok(ConnectionKey { scheme, host, port })
     }
 }
@@ -132,7 +130,8 @@ impl ConnectionPoolInner {
                             connection_id = conn.connection_id,
                             "Connection expired, creating new one"
                         );
-                        self.active_count.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                        self.active_count
+                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
                     conn.touch();
@@ -145,14 +144,12 @@ impl ConnectionPoolInner {
                 Err(_) => {
                     let current = self.active_count.load(std::sync::atomic::Ordering::Relaxed);
                     if current < self.config.max_size {
-                        self.active_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.active_count
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let connection_id = self
                             .next_connection_id
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        trace!(
-                            connection_id = connection_id,
-                            "Creating new connection"
-                        );
+                        trace!(connection_id = connection_id, "Creating new connection");
                         return self.create_connection(key, connection_id).await;
                     } else {
                         if let Ok(mut conn) = self.receiver.recv().await {
@@ -190,7 +187,7 @@ impl ConnectionPoolInner {
         connection_id: u64,
     ) -> RouterResult<PooledConnection> {
         let tcp_stream = TcpStream::connect((&key.host[..], key.port)).await?;
-        
+
         let stream = if key.scheme == "https" {
             let tls_connector = create_tls_connector();
             let tls_stream = tls_connector
@@ -207,13 +204,15 @@ impl ConnectionPoolInner {
 
     async fn return_connection(&self, conn: PooledConnection) {
         if self.sender.try_send(conn).is_err() {
-            self.active_count.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.active_count
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             trace!("Connection pool full, dropping connection");
         }
     }
 
     fn recycle_connection(&self) {
-        self.active_count.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.active_count
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -254,7 +253,8 @@ impl ConnectionPool {
     }
 }
 
-static CONNECTION_POOL: Lazy<ConnectionPool> = Lazy::new(|| ConnectionPool::new(PoolConfig::default()));
+static CONNECTION_POOL: Lazy<ConnectionPool> =
+    Lazy::new(|| ConnectionPool::new(PoolConfig::default()));
 
 fn create_tls_connector() -> TlsConnector {
     TlsConnector::new()
@@ -291,15 +291,18 @@ fn parse_http_response(response: &[u8]) -> RouterResult<(usize, HashMap<String, 
     let header_end = response
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| RouterError::Upstream("Invalid HTTP response: no header separator".to_string()))?;
+        .ok_or_else(|| {
+            RouterError::Upstream("Invalid HTTP response: no header separator".to_string())
+        })?;
 
     let headers_str = std::str::from_utf8(&response[..header_end])
         .map_err(|_| RouterError::Upstream("Invalid UTF-8 in response headers".to_string()))?;
 
     let mut lines = headers_str.lines();
-    let status_line = lines.next()
+    let status_line = lines
+        .next()
         .ok_or_else(|| RouterError::Upstream("Empty HTTP response".to_string()))?;
-    
+
     let status_code = status_line
         .split_whitespace()
         .nth(1)
@@ -394,7 +397,7 @@ async fn send_request_on_connection(
             if let Ok((_, headers, start)) = parse_http_response(&response) {
                 headers_parsed = true;
                 body_start = start;
-                
+
                 if let Some(cl) = headers.get("content-length") {
                     content_length = cl.parse().ok();
                 }
@@ -437,7 +440,15 @@ pub async fn handle_streaming_request(
     let request_bytes = build_request_bytes(method, path, &key.host, headers, Some(body));
     let mut conn = CONNECTION_POOL.acquire(&key).await?;
 
-    match stream_response_to_client(&mut conn, client_stream, &request_bytes, buffer_size, heartbeat_interval).await {
+    match stream_response_to_client(
+        &mut conn,
+        client_stream,
+        &request_bytes,
+        buffer_size,
+        heartbeat_interval,
+    )
+    .await
+    {
         Ok(()) => {
             CONNECTION_POOL.return_connection(&key, conn).await;
             Ok(())
@@ -577,10 +588,10 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("Content-Type".to_string(), "application/json".to_string());
         headers.insert("Authorization".to_string(), "Bearer token123".to_string());
-        
+
         let body = b"{\"key\":\"value\"}";
         let request = build_request_bytes("POST", "/api/test", "example.com", &headers, Some(body));
-        
+
         let request_str = String::from_utf8_lossy(&request);
         assert!(request_str.contains("POST /api/test HTTP/1.1"));
         assert!(request_str.contains("Host: example.com"));
@@ -595,7 +606,7 @@ mod tests {
     fn build_request_bytes_without_body() {
         let headers = HashMap::new();
         let request = build_request_bytes("GET", "/api/test", "example.com", &headers, None);
-        
+
         let request_str = String::from_utf8_lossy(&request);
         assert!(request_str.contains("GET /api/test HTTP/1.1"));
         assert!(request_str.contains("Host: example.com"));
@@ -692,7 +703,10 @@ mod tests {
     fn pool_config_default_values() {
         let config = PoolConfig::default();
         assert_eq!(config.max_size, DEFAULT_POOL_MAX_SIZE);
-        assert_eq!(config.idle_timeout, Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS));
+        assert_eq!(
+            config.idle_timeout,
+            Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS)
+        );
     }
 
     #[test]

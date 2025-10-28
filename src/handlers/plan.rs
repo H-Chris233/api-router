@@ -154,9 +154,7 @@ fn build_upstream_headers(
     default_api_key: &str,
     content_type: Option<&str>,
 ) -> HashMap<String, String> {
-    let mut headers = HashMap::with_capacity(
-        config.headers.len() + endpoint.headers.len() + 4,
-    );
+    let mut headers = HashMap::with_capacity(config.headers.len() + endpoint.headers.len() + 4);
 
     for (key, value) in &config.headers {
         headers.insert(key.clone(), value.clone());
@@ -221,13 +219,7 @@ mod tests {
     }
 
     fn mock_parsed_request(target: &str) -> ParsedRequest {
-        ParsedRequest::new_for_tests(
-            "POST",
-            target,
-            "HTTP/1.1",
-            HashMap::new(),
-            vec![],
-        )
+        ParsedRequest::new_for_tests("POST", target, "HTTP/1.1", HashMap::new(), vec![])
     }
 
     #[test]
@@ -380,28 +372,50 @@ mod tests {
         let config = base_config();
         let request = mock_parsed_request("/v1/chat");
         let plan = prepare_forward_plan("/v1/chat", &request, &config, "my-api-key", None);
-        assert_eq!(plan.headers().get("Authorization"), Some(&"Bearer my-api-key".to_string()));
+        assert_eq!(
+            plan.headers().get("Authorization"),
+            Some(&"Bearer my-api-key".to_string())
+        );
     }
 
     #[test]
     fn prepare_forward_plan_merges_config_and_endpoint_headers() {
         let mut config = base_config();
-        config.headers.insert("X-Global".to_string(), "global-value".to_string());
+        config
+            .headers
+            .insert("X-Global".to_string(), "global-value".to_string());
         let mut endpoint = EndpointConfig::default();
-        endpoint.headers.insert("X-Endpoint".to_string(), "endpoint-value".to_string());
+        endpoint
+            .headers
+            .insert("X-Endpoint".to_string(), "endpoint-value".to_string());
         config.endpoints.insert("/v1/test".to_string(), endpoint);
         let request = mock_parsed_request("/v1/test");
         let plan = prepare_forward_plan("/v1/test", &request, &config, "key", None);
-        assert_eq!(plan.headers().get("X-Global"), Some(&"global-value".to_string()));
-        assert_eq!(plan.headers().get("X-Endpoint"), Some(&"endpoint-value".to_string()));
+        assert_eq!(
+            plan.headers().get("X-Global"),
+            Some(&"global-value".to_string())
+        );
+        assert_eq!(
+            plan.headers().get("X-Endpoint"),
+            Some(&"endpoint-value".to_string())
+        );
     }
 
     #[test]
     fn prepare_forward_plan_includes_content_type() {
         let config = base_config();
         let request = mock_parsed_request("/v1/chat");
-        let plan = prepare_forward_plan("/v1/chat", &request, &config, "key", Some("application/json"));
-        assert_eq!(plan.headers().get("Content-Type"), Some(&"application/json".to_string()));
+        let plan = prepare_forward_plan(
+            "/v1/chat",
+            &request,
+            &config,
+            "key",
+            Some("application/json"),
+        );
+        assert_eq!(
+            plan.headers().get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
     }
 
     #[test]
@@ -413,9 +427,18 @@ mod tests {
         headers.insert("x-request-id".to_string(), "req-123".to_string());
         let request = ParsedRequest::new_for_tests("POST", "/v1/chat", "HTTP/1.1", headers, vec![]);
         let plan = prepare_forward_plan("/v1/chat", &request, &config, "key", None);
-        assert_eq!(plan.headers().get("Accept"), Some(&"application/json".to_string()));
-        assert_eq!(plan.headers().get("User-Agent"), Some(&"TestClient/1.0".to_string()));
-        assert_eq!(plan.headers().get("x-request-id"), Some(&"req-123".to_string()));
+        assert_eq!(
+            plan.headers().get("Accept"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            plan.headers().get("User-Agent"),
+            Some(&"TestClient/1.0".to_string())
+        );
+        assert_eq!(
+            plan.headers().get("x-request-id"),
+            Some(&"req-123".to_string())
+        );
     }
 
     #[test]
@@ -425,7 +448,10 @@ mod tests {
         headers.insert("authorization".to_string(), "Bearer client-key".to_string());
         let request = ParsedRequest::new_for_tests("POST", "/v1/chat", "HTTP/1.1", headers, vec![]);
         let plan = prepare_forward_plan("/v1/chat", &request, &config, "default-key", None);
-        assert_eq!(plan.headers().get("Authorization"), Some(&"Bearer client-key".to_string()));
+        assert_eq!(
+            plan.headers().get("Authorization"),
+            Some(&"Bearer client-key".to_string())
+        );
     }
 
     #[test]

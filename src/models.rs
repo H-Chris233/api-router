@@ -234,7 +234,10 @@ mod tests {
         assert_eq!(response.object, "chat.completion");
         assert_eq!(response.model, "gpt-4");
         assert_eq!(response.choices.len(), 1);
-        assert_eq!(response.choices[0].message.content, "Hello, how can I help?");
+        assert_eq!(
+            response.choices[0].message.content,
+            "Hello, how can I help?"
+        );
         assert!(response.usage.is_some());
         assert_eq!(response.usage.unwrap().total_tokens, 30);
     }
