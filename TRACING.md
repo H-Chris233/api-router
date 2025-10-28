@@ -4,7 +4,7 @@ API Router uses the `tracing` framework to provide structured, contextual loggin
 
 ## Features
 
-- **Request ID Tracking**: Each request receives a unique UUID for end-to-end traceability
+- **Request ID Tracking**: Each request receives a unique 32-character hexadecimal ID for end-to-end traceability
 - **Latency Monitoring**: Automatic measurement of request and upstream latencies in milliseconds
 - **Structured Metadata**: Rich context including client IP, route, method, status codes, and upstream provider
 - **JSON Output**: Optional JSON-formatted logs for easy ingestion into log aggregation systems
@@ -53,7 +53,7 @@ cargo run
 
 Each inbound HTTP request creates a span with the following fields:
 
-- `request_id`: Unique UUID identifying this request
+- `request_id`: Unique 32-character hexadecimal string identifying this request
 - `client_ip`: IP address of the client
 - `method`: HTTP method (GET, POST, etc.)
 - `route`: Request path (e.g., `/v1/chat/completions`)
@@ -74,7 +74,7 @@ API calls to upstream providers create nested spans with:
 
 **Human-readable format:**
 ```
-2024-01-15T10:23:45.123Z  INFO http_request{request_id=a1b2c3d4-e5f6-7890-abcd-ef1234567890 client_ip=192.168.1.100 method=POST route=/v1/chat/completions status_code=200 latency_ms=234.56}: Request completed successfully provider=qwen
+2024-01-15T10:23:45.123Z  INFO http_request{request_id=1f43c8a0b2d4e6f8097ad5c3b1e4f27a client_ip=192.168.1.100 method=POST route=/v1/chat/completions status_code=200 latency_ms=234.56}: Request completed successfully provider=qwen
 ```
 
 **JSON format:**
@@ -88,7 +88,7 @@ API calls to upstream providers create nested spans with:
   "target": "api_router::handlers::router",
   "span": {
     "name": "http_request",
-    "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "request_id": "1f43c8a0b2d4e6f8097ad5c3b1e4f27a",
     "client_ip": "192.168.1.100",
     "method": "POST",
     "route": "/v1/chat/completions",
@@ -116,7 +116,7 @@ Track a specific request across log entries using the `request_id`:
 
 ```bash
 # Follow a specific request through the system
-grep "a1b2c3d4-e5f6-7890-abcd-ef1234567890" api-router.log
+grep "1f43c8a0b2d4e6f8097ad5c3b1e4f27a" api-router.log
 ```
 
 ### Status Code Distribution

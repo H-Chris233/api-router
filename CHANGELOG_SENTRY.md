@@ -70,7 +70,7 @@ Added optional Sentry error tracking and alerting integration to API Router. Thi
 ### Error Capture
 - Automatic capture of all unhandled errors
 - Rich context includes:
-  - Request ID (UUID)
+  - Request ID (32-character hex string)
   - Route path
   - Anonymized API key (first 8 chars only)
   - Provider information (qwen, openai, anthropic, etc.)

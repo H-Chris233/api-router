@@ -1,9 +1,21 @@
-use std::time::Instant;
-use uuid::Uuid;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Generate a unique request ID
 pub fn generate_request_id() -> String {
-    Uuid::new_v4().to_string()
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let counter = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
+
+    format!(
+        "{:016x}{:08x}{:08x}",
+        now.as_secs(),
+        now.subsec_nanos(),
+        counter
+    )
 }
 
 /// Helper to calculate elapsed time in milliseconds
@@ -37,7 +49,8 @@ mod tests {
         let id1 = generate_request_id();
         let id2 = generate_request_id();
         assert_ne!(id1, id2);
-        assert_eq!(id1.len(), 36); // UUID v4 format
+        assert_eq!(id1.len(), 32);
+        assert!(id1.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
