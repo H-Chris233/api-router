@@ -1,0 +1,1 @@
+Unable to generate dependency tree: the execution environment does not provide the Rust toolchain (`cargo`). Run `cargo tree` locally to produce the canonical dependency graph for audit purposes.
