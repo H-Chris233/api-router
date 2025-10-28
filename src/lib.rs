@@ -8,5 +8,7 @@ pub mod rate_limit;
 pub mod tracing_util;
 pub mod metrics;
 
+pub use http_client::PoolConfig;
+
 #[cfg(test)]
 mod tracing_tests;

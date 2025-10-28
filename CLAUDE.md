@@ -10,6 +10,7 @@ API Router 是一个轻量级的API请求转发服务，将API请求转换为Ope
 
 - **核心运行时**: 使用smol作为异步运行时，提供轻量级异步服务
 - **HTTP客户端**: 基于smol构建的原生HTTP/HTTPS客户端，使用async-tls提供TLS支持
+- **连接池**: 使用async-channel实现per-destination连接池，支持HTTP/1.1 keep-alive与TLS会话复用
 - **配置管理**: 通过transformer目录中的JSON配置文件动态加载API配置
 - **请求处理**: 支持标准请求与SSE流式响应的代理转发
 - **速率限制**: 使用dashmap实现并发安全的令牌桶限流器
@@ -84,7 +85,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 - `src/main.rs`: 主应用入口，TCP监听器与连接分发
 - `src/handlers.rs`: HTTP请求解析、路由处理与请求转发
-- `src/http_client.rs`: HTTP/HTTPS客户端实现，支持SSE流式响应
+- `src/http_client.rs`: HTTP/HTTPS客户端实现，支持SSE流式响应与连接池
 - `src/config.rs`: 配置文件数据结构定义
 - `src/models.rs`: OpenAI兼容的请求/响应模型
 - `src/rate_limit.rs`: 令牌桶速率限制器实现
@@ -93,6 +94,29 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   - `qwen.json`: 通义千问API配置
   - `openai.json`: OpenAI API配置
   - 其他提供商配置（anthropic, cohere, gemini等）
+
+## 连接池实现
+
+详见 `CONNECTION_POOL.md` 文档。关键特性：
+
+- **Per-destination池**: 每个(scheme, host, port)独立的连接池
+- **HTTP/1.1 keep-alive**: 使用Connection: keep-alive实现连接复用
+- **TLS会话复用**: 减少TLS握手开销
+- **配置参数**: 
+  - `max_size`: 每个池的最大连接数（默认10）
+  - `idle_timeout`: 空闲连接超时时间（默认60秒）
+- **并发安全**: 使用DashMap + async-channel实现无锁并发
+- **自动清理**: 过期连接自动回收
+- **错误恢复**: 失败连接自动recycling，不污染连接池
+
+测试与基准：
+```bash
+# 运行连接池测试
+cargo test connection_pool
+
+# 运行连接池性能基准测试
+./benchmarks/connection_pool_bench.sh
+```
 
 ## 端点说明
 
@@ -126,15 +150,15 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 当前核心依赖：
 - `smol` - 异步运行时（提供网络、I/O、任务调度）
 - `async-tls` + `rustls` - TLS/HTTPS支持
+- `async-channel` - 异步通道（连接池队列）
 - `serde` + `serde_json` - JSON序列化（已优化特性）
 - `url` - URL解析（已禁用默认特性）
-- `dashmap` - 并发哈希表（速率限制）
-- `once_cell` - 全局单例（`RATE_LIMITER`）
+- `dashmap` - 并发哈希表（速率限制、连接池索引）
+- `once_cell` - 全局单例（`RATE_LIMITER`、`CONNECTION_POOL`）
 - `log` + `env_logger` - 日志系统
 - `thiserror` - 错误处理
 
 **已移除的依赖**:
-- ~~`async-channel`~~ - 未使用
 - ~~`bytes`~~ - 未使用
 - ~~`futures-lite`~~ - 已用`smol::io`替代
 
