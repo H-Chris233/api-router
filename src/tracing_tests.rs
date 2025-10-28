@@ -11,7 +11,8 @@ mod tests {
         let id2 = generate_request_id();
 
         assert_ne!(id1, id2, "Request IDs should be unique");
-        assert_eq!(id1.len(), 36, "Request ID should be UUID format");
+        assert_eq!(id1.len(), 32, "Request ID should be 32 hex characters");
+        assert!(id1.chars().all(|c| c.is_ascii_hexdigit()), "Request ID must be hex");
     }
 
     #[test]

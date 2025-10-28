@@ -82,27 +82,27 @@ curl http://localhost:8000/metrics | head -n 20
 - `webpki-roots` (v0.22) - 根证书集合
 
 **并发与日志**：
+- `async-channel` (v2) - 连接池的有界异步队列
 - `dashmap` (v5) - 线程安全的并发 HashMap，用于速率限制
 - `once_cell` (v1.19) - 延迟初始化静态变量（`Lazy`）
 - `tracing` (v0.1) - 结构化日志与跟踪框架
 - `tracing-subscriber` (v0.3, features: json, env-filter) - 日志订阅器，支持 JSON 输出与环境变量过滤
-- `uuid` (v1.0, features: v4, fast-rng) - 生成请求 ID
 
 **错误处理**：
 - `thiserror` (v1) - 派生宏简化错误类型定义
 
 **监控与指标**：
 - `prometheus` (v0.13, 无默认特性) - Prometheus 指标收集
-- `lazy_static` (v1.4) - 静态变量初始化，用于全局指标注册
 - `sentry` (v0.34, features: backtrace, contexts, panic, rustls) - 可选错误追踪
 - `sentry-tracing` (v0.34) - Sentry 与 tracing 集成
 
 **已移除的冗余依赖**：
-- ~~`async-channel`~~ - 未使用
 - ~~`bytes`~~ - 未使用
 - ~~`futures-lite`~~ - 已用 `smol::io` 提供的 I/O 扩展替代
 - ~~`log`~~ - 已迁移到 `tracing`
 - ~~`env_logger`~~ - 已替换为 `tracing-subscriber`
+- ~~`uuid`~~ - 替换为轻量级十六进制请求 ID 生成器
+- ~~`lazy_static`~~ - 使用 `once_cell::Lazy` 统一延迟初始化
 
 通过精简依赖与禁用非必要特性，显著减少了依赖树深度与编译时间。
 
@@ -297,7 +297,7 @@ export RUST_LOG=api_router=debug,hyper=warn
 ```
 
 **日志字段**：
-- `request_id`：每个请求的唯一 UUID
+- `request_id`：每个请求的唯一 32 位十六进制标识
 - `client_ip`：客户端 IP 地址
 - `method`：HTTP 方法
 - `route`：请求路径

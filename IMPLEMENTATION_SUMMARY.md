@@ -19,7 +19,7 @@ All requirements have been successfully implemented:
    - Integration with existing tracing infrastructure
 
 3. ✅ **Wrap handler errors to record contexts**
-   - Request ID: Unique UUID for every request
+   - Request ID: Unique 32-character hexadecimal ID for every request
    - API Key: Anonymized (first 8 characters only)
    - Upstream: Provider information extracted from config
    - Route: Full path and method captured

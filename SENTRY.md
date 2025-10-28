@@ -105,7 +105,7 @@ export SENTRY_ENVIRONMENT="development"
 Each error captured by Sentry includes:
 
 ### Tags (for filtering)
-- `request_id`: Unique UUID for the request
+- `request_id`: Unique 32-character hexadecimal string for the request
 - `route`: API endpoint path (e.g., `/v1/chat/completions`)
 - `error_type`: Classification (upstream_error, tls_error, etc.)
 - `provider`: Upstream provider (qwen, openai, anthropic, etc.)
@@ -252,7 +252,7 @@ use tracing::error;
 
 error!(
     provider = "qwen",
-    request_id = "abc-123",
+    request_id = "1f43c8a0b2d4e6f8097ad5c3b1e4f27a",
     "Upstream API request failed"
 );
 // ↑ Automatically captured in Sentry as breadcrumb

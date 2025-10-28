@@ -1,41 +1,53 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prometheus::{
     register_counter_vec, register_gauge, register_histogram_vec, CounterVec, Encoder, Gauge,
     HistogramVec, TextEncoder,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
-lazy_static! {
-    pub static ref REQUESTS_TOTAL: CounterVec = register_counter_vec!(
+pub static REQUESTS_TOTAL: Lazy<CounterVec> = Lazy::new(|| {
+    register_counter_vec!(
         "requests_total",
         "Total number of HTTP requests by route, method, and status",
         &["route", "method", "status"]
     )
-    .expect("failed to register requests_total metric");
-    pub static ref UPSTREAM_ERRORS_TOTAL: CounterVec = register_counter_vec!(
+    .expect("failed to register requests_total metric")
+});
+
+pub static UPSTREAM_ERRORS_TOTAL: Lazy<CounterVec> = Lazy::new(|| {
+    register_counter_vec!(
         "upstream_errors_total",
         "Total number of upstream errors by error type",
         &["error_type"]
     )
-    .expect("failed to register upstream_errors_total metric");
-    pub static ref REQUEST_LATENCY_SECONDS: HistogramVec = register_histogram_vec!(
+    .expect("failed to register upstream_errors_total metric")
+});
+
+pub static REQUEST_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    register_histogram_vec!(
         "request_latency_seconds",
         "Request latency in seconds by route",
         &["route"],
         vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
     )
-    .expect("failed to register request_latency_seconds metric");
-    pub static ref ACTIVE_CONNECTIONS: Gauge = register_gauge!(
+    .expect("failed to register request_latency_seconds metric")
+});
+
+pub static ACTIVE_CONNECTIONS: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge!(
         "active_connections",
         "Number of currently active connections"
     )
-    .expect("failed to register active_connections metric");
-    pub static ref RATE_LIMITER_BUCKETS: Gauge = register_gauge!(
+    .expect("failed to register active_connections metric")
+});
+
+pub static RATE_LIMITER_BUCKETS: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge!(
         "rate_limiter_buckets",
         "Number of active rate limiter buckets"
     )
-    .expect("failed to register rate_limiter_buckets metric");
-}
+    .expect("failed to register rate_limiter_buckets metric")
+});
 
 static ACTIVE_CONNECTIONS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
