@@ -1,3 +1,12 @@
+//! Prometheus 指标收集模块
+//! 
+//! 提供以下监控指标：
+//! - 请求计数（按路由、方法、状态码分组）
+//! - 请求延迟分布
+//! - 活跃连接数
+//! - 上游错误计数
+//! - 速率限制器状态
+
 use once_cell::sync::Lazy;
 use prometheus::{
     register_counter_vec, register_gauge, register_histogram_vec, CounterVec, Encoder, Gauge,
@@ -5,6 +14,7 @@ use prometheus::{
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// 请求总数指标（按路由、方法、状态码分组）
 pub static REQUESTS_TOTAL: Lazy<CounterVec> = Lazy::new(|| {
     register_counter_vec!(
         "requests_total",

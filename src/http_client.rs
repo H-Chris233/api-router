@@ -1,3 +1,12 @@
+//! HTTP 客户端模块
+//! 
+//! 提供基于 smol 的 HTTP/HTTPS 客户端实现，支持：
+//! - HTTP/1.1 keep-alive 连接复用
+//! - TLS/HTTPS 连接
+//! - 连接池管理
+//! - 流式响应（SSE）
+//! - 反压和心跳机制
+
 use crate::config::StreamConfig;
 use crate::errors::{RouterError, RouterResult};
 use async_channel::{bounded, Receiver, Sender};
@@ -12,7 +21,9 @@ use std::time::{Duration, Instant};
 use tracing::{debug, trace, warn};
 use url::Url;
 
+/// 连接池最大连接数
 const DEFAULT_POOL_MAX_SIZE: usize = 10;
+/// 连接池空闲超时时间（秒）
 const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

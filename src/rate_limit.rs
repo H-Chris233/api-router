@@ -1,60 +1,93 @@
+//! 速率限制模块
+//! 
+//! 实现基于令牌桶算法的速率限制器，支持按 API Key 和路由的细粒度限流
+
 use crate::config::ApiConfig;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::time::Instant;
 
+/// 速率限制配置
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RateLimitSettings {
+    /// 每分钟允许的请求数
     pub requests_per_minute: u32,
+    /// 突发容量
     pub burst: u32,
 }
 
+/// 速率限制决策结果
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RateLimitDecision {
+    /// 允许通过
     Allowed,
+    /// 已限流，需要等待指定秒数后重试
     Limited { retry_after_seconds: u64 },
 }
 
+/// 速率限制器快照，用于监控和调试
 #[derive(Debug, Clone, Default)]
 pub struct RateLimiterSnapshot {
+    /// 活跃的令牌桶数量
     pub active_buckets: usize,
+    /// 按路由分组的令牌桶数量
     pub routes: HashMap<String, usize>,
 }
 
+/// 速率限制器
+/// 
+/// 使用 DashMap 实现并发安全的令牌桶存储
+/// 键为 (route, api_key) 元组，每个键对应一个独立的令牌桶
 pub struct RateLimiter {
     buckets: DashMap<(String, String), TokenBucket>,
 }
 
+/// 令牌桶结构
+/// 
+/// 实现令牌桶算法，支持令牌的自动补充和消费
 #[derive(Debug, Clone)]
 struct TokenBucket {
+    /// 当前令牌数
     tokens: f64,
+    /// 桶容量（最大令牌数）
     capacity: f64,
+    /// 每秒补充的令牌数
     refill_per_second: f64,
+    /// 上次补充时间
     last_refill: Instant,
+    /// 速率限制配置
     settings: RateLimitSettings,
 }
 
+/// 全局速率限制器单例
 pub static RATE_LIMITER: Lazy<RateLimiter> = Lazy::new(|| RateLimiter::new());
 
+/// 从环境变量读取每分钟请求数限制
 fn env_requests_per_minute() -> Option<u32> {
     std::env::var("RATE_LIMIT_REQUESTS_PER_MINUTE")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
 }
 
+/// 从环境变量读取突发容量限制
 fn env_burst() -> Option<u32> {
     std::env::var("RATE_LIMIT_BURST")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
 }
 
+/// 解析速率限制配置
+/// 
+/// 优先级：端点配置 > 全局配置 > 环境变量
+/// 如果 requests_per_minute 为 0，则返回 None 表示不限流
 pub fn resolve_rate_limit_settings(
     route_path: &str,
     config: &ApiConfig,
 ) -> Option<RateLimitSettings> {
     let endpoint_config = config.endpoints.get(route_path);
 
+    // 解析每分钟请求数限制
     let requests_per_minute = endpoint_config
         .and_then(|cfg| cfg.rate_limit.as_ref())
         .and_then(|rl| rl.requests_per_minute)
@@ -66,10 +99,12 @@ pub fn resolve_rate_limit_settings(
         })
         .or_else(env_requests_per_minute)?;
 
+    // 如果设置为 0，表示不限流
     if requests_per_minute == 0 {
         return None;
     }
 
+    // 解析突发容量，默认等于 requests_per_minute
     let burst = endpoint_config
         .and_then(|cfg| cfg.rate_limit.as_ref())
         .and_then(|rl| rl.burst)
@@ -85,12 +120,23 @@ pub fn resolve_rate_limit_settings(
 }
 
 impl RateLimiter {
+    /// 创建新的速率限制器实例
     pub fn new() -> Self {
         Self {
             buckets: DashMap::new(),
         }
     }
 
+    /// 检查请求是否在速率限制内
+    /// 
+    /// # 参数
+    /// - `route`: 请求路由路径
+    /// - `api_key`: API 密钥
+    /// - `settings`: 速率限制配置
+    /// 
+    /// # 返回
+    /// - `RateLimitDecision::Allowed`: 请求被允许
+    /// - `RateLimitDecision::Limited`: 请求被限流，包含重试等待时间
     pub fn check(
         &self,
         route: &str,

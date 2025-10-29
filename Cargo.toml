@@ -2,6 +2,9 @@
 name = "api-router"
 version = "0.1.0"
 edition = "2021"
+description = "轻量级 API 请求转发服务，将各种 API 转换为 OpenAI 兼容格式"
+authors = []
+license = "MIT"
 
 [[bin]]
 name = "api-router"
