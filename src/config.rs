@@ -1,5 +1,5 @@
 //! 配置管理模块
-//! 
+//!
 //! 提供 API Router 的配置加载、缓存和热重载功能。
 //! 支持从 JSON 文件加载配置，并自动检测文件变更进行热重载。
 
@@ -152,7 +152,7 @@ fn cache_cell() -> &'static RwLock<ConfigCache> {
 }
 
 /// 解析配置文件路径
-/// 
+///
 /// 优先级：
 /// 1. 环境变量 API_ROUTER_CONFIG_PATH 指定的路径
 /// 2. 命令行参数指定的配置名称（在 transformer/ 目录下查找）
@@ -181,7 +181,7 @@ fn resolve_config_paths() -> ConfigPaths {
 }
 
 /// 检查配置是否需要重新加载
-/// 
+///
 /// 通过比较文件的最后修改时间来判断是否需要重新加载配置
 fn needs_reload(entry: &CachedConfig, paths: &ConfigPaths) -> bool {
     match fs::metadata(&paths.primary) {
@@ -209,7 +209,7 @@ fn needs_reload(entry: &CachedConfig, paths: &ConfigPaths) -> bool {
 }
 
 /// 从指定路径读取配置文件
-/// 
+///
 /// 返回配置内容和文件的最后修改时间
 fn read_config_from_path(path: &Path) -> RouterResult<(ApiConfig, Option<SystemTime>)> {
     let file = File::open(path).map_err(|e| {
@@ -223,7 +223,7 @@ fn read_config_from_path(path: &Path) -> RouterResult<(ApiConfig, Option<SystemT
 }
 
 /// 使用指定的路径集合加载配置
-/// 
+///
 /// 尝试加载主配置，如果失败则尝试回退配置
 fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
     match read_config_from_path(&paths.primary) {
@@ -252,12 +252,12 @@ fn load_config_with_paths(paths: &ConfigPaths) -> RouterResult<CachedConfig> {
 }
 
 /// 加载 API 配置
-/// 
+///
 /// 该函数会：
 /// 1. 首先尝试从缓存中获取配置
 /// 2. 检查配置文件是否有更新
 /// 3. 如果需要，重新加载配置文件
-/// 
+///
 /// 配置文件支持热重载，修改配置文件后会自动重新加载
 pub fn load_api_config() -> RouterResult<Arc<ApiConfig>> {
     let paths = resolve_config_paths();

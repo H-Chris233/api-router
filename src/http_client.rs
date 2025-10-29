@@ -1,5 +1,5 @@
 //! HTTP 客户端模块
-//! 
+//!
 //! 提供基于 smol 的 HTTP/HTTPS 客户端实现，支持：
 //! - HTTP/1.1 keep-alive 连接复用
 //! - TLS/HTTPS 连接

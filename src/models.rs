@@ -1,5 +1,5 @@
 //! OpenAI 兼容的数据模型定义
-//! 
+//!
 //! 包含请求和响应的数据结构，用于与上游 API 通信
 
 use serde::{Deserialize, Serialize};

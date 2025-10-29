@@ -1,5 +1,5 @@
 //! 速率限制模块
-//! 
+//!
 //! 实现基于令牌桶算法的速率限制器，支持按 API Key 和路由的细粒度限流
 
 use crate::config::ApiConfig;
@@ -36,7 +36,7 @@ pub struct RateLimiterSnapshot {
 }
 
 /// 速率限制器
-/// 
+///
 /// 使用 DashMap 实现并发安全的令牌桶存储
 /// 键为 (route, api_key) 元组，每个键对应一个独立的令牌桶
 pub struct RateLimiter {
@@ -44,7 +44,7 @@ pub struct RateLimiter {
 }
 
 /// 令牌桶结构
-/// 
+///
 /// 实现令牌桶算法，支持令牌的自动补充和消费
 #[derive(Debug, Clone)]
 struct TokenBucket {
@@ -78,7 +78,7 @@ fn env_burst() -> Option<u32> {
 }
 
 /// 解析速率限制配置
-/// 
+///
 /// 优先级：端点配置 > 全局配置 > 环境变量
 /// 如果 requests_per_minute 为 0，则返回 None 表示不限流
 pub fn resolve_rate_limit_settings(
@@ -128,12 +128,12 @@ impl RateLimiter {
     }
 
     /// 检查请求是否在速率限制内
-    /// 
+    ///
     /// # 参数
     /// - `route`: 请求路由路径
     /// - `api_key`: API 密钥
     /// - `settings`: 速率限制配置
-    /// 
+    ///
     /// # 返回
     /// - `RateLimitDecision::Allowed`: 请求被允许
     /// - `RateLimitDecision::Limited`: 请求被限流，包含重试等待时间

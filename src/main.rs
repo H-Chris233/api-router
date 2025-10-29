@@ -38,11 +38,11 @@ fn default_config() -> ApiConfig {
 }
 
 /// 初始化追踪和日志系统
-/// 
+///
 /// 根据 LOG_FORMAT 环境变量决定日志格式：
 /// - "json": 输出 JSON 格式日志
 /// - 其他: 输出人类可读格式
-/// 
+///
 /// 日志级别通过 RUST_LOG 环境变量控制，默认为 info
 fn init_tracing() {
     let use_json = env::var("LOG_FORMAT")
@@ -82,22 +82,13 @@ fn main() -> smol::io::Result<()> {
             Err(err) => {
                 match &err {
                     RouterError::ConfigParse(message) => {
-                        warn!(
-                            "配置解析失败，使用默认端口 8000: {}",
-                            message
-                        )
+                        warn!("配置解析失败，使用默认端口 8000: {}", message)
                     }
                     RouterError::ConfigRead(message) => {
-                        error!(
-                            "配置文件加载失败 ({}). 使用默认端口 8000",
-                            message
-                        )
+                        error!("配置文件加载失败 ({}). 使用默认端口 8000", message)
                     }
                     other => {
-                        error!(
-                            "意外的配置错误 ({}). 使用默认端口 8000",
-                            other
-                        )
+                        error!("意外的配置错误 ({}). 使用默认端口 8000", other)
                     }
                 }
                 Arc::new(default_config())

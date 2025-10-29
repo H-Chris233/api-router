@@ -1,5 +1,5 @@
 //! 追踪工具模块
-//! 
+//!
 //! 提供请求追踪和日志记录的辅助函数
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +9,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// 生成唯一的请求 ID
-/// 
+///
 /// 请求 ID 由时间戳和递增计数器组成，格式为 32 位十六进制字符串
 pub fn generate_request_id() -> String {
     let now = SystemTime::now()
@@ -31,7 +31,7 @@ pub fn elapsed_ms(start: Instant) -> f64 {
 }
 
 /// 从基础 URL 提取提供商名称
-/// 
+///
 /// 根据 URL 中的域名识别 API 提供商
 pub fn extract_provider(base_url: &str) -> &str {
     if base_url.contains("dashscope.aliyuncs.com") {

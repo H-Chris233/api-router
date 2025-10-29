@@ -1,12 +1,12 @@
 //! 错误类型定义模块
-//! 
+//!
 //! 定义 API Router 中使用的所有错误类型和结果类型
 
 use std::io;
 use thiserror::Error;
 
 /// Router 错误类型
-/// 
+///
 /// 包含所有可能的错误情况，使用 thiserror 自动实现 Error trait
 #[derive(Error, Debug)]
 pub enum RouterError {
