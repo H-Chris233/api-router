@@ -7,12 +7,12 @@ mod metrics;
 mod models;
 mod rate_limit;
 mod tracing_util;
+mod url_parser;
 
 #[cfg(test)]
 mod tracing_tests;
 
 use config::{load_api_config, ApiConfig};
-use error_tracking::{init_sentry, SentryConfig};
 use errors::RouterError;
 use handlers::handle_request;
 
@@ -68,10 +68,6 @@ fn init_tracing() {
 
 fn main() -> smol::io::Result<()> {
     init_tracing();
-
-    // 初始化 Sentry 错误追踪
-    let sentry_config = SentryConfig::from_env();
-    let _sentry_guard = init_sentry(&sentry_config);
 
     smol::block_on(async {
         let args: Vec<String> = env::args().collect();

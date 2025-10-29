@@ -9,6 +9,7 @@
 
 use crate::config::StreamConfig;
 use crate::errors::{RouterError, RouterResult};
+use crate::url_parser::Url;
 use async_channel::{bounded, Receiver, Sender};
 use async_tls::TlsConnector;
 use dashmap::DashMap;
@@ -19,7 +20,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, trace, warn};
-use url::Url;
 
 /// 连接池最大连接数
 const DEFAULT_POOL_MAX_SIZE: usize = 10;
@@ -342,15 +342,10 @@ fn extract_body_from_response(response: Vec<u8>) -> Vec<u8> {
 }
 
 fn path_with_query(url: &Url) -> String {
-    let mut combined = url.path().to_string();
-    if let Some(query) = url.query() {
-        combined.push('?');
-        combined.push_str(query);
+    match url.query() {
+        Some(q) => format!("{}?{}", url.path(), q),
+        None => url.path().to_string(),
     }
-    if combined.is_empty() {
-        combined.push('/');
-    }
-    combined
 }
 
 pub async fn send_http_request(

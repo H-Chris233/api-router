@@ -17,6 +17,7 @@ pub mod metrics;
 pub mod models;
 pub mod rate_limit;
 pub mod tracing_util;
+pub mod url_parser;
 
 pub use http_client::PoolConfig;
 
