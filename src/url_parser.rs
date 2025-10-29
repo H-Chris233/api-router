@@ -78,7 +78,10 @@ impl Url {
     }
 
     pub fn port_or_known_default(&self) -> Option<u16> {
-        Some(self.port.unwrap_or(if self.scheme == "https" { 443 } else { 80 }))
+        Some(
+            self.port
+                .unwrap_or(if self.scheme == "https" { 443 } else { 80 }),
+        )
     }
 
     pub fn path(&self) -> &str {
