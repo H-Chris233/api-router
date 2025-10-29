@@ -1,77 +1,120 @@
+//! OpenAI 兼容的数据模型定义
+//! 
+//! 包含请求和响应的数据结构，用于与上游 API 通信
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// OpenAI兼容的请求结构
+/// Chat Completion 请求结构（OpenAI 格式）
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ChatCompletionRequest {
+    /// 模型名称
     pub model: String,
+    /// 对话消息列表
     pub messages: Vec<Message>,
+    /// 采样温度（0-2），默认 1
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// 是否启用流式响应
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// 最大生成 token 数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
 }
 
+/// 对话消息结构
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Message {
+    /// 消息角色：system, user, assistant
     pub role: String,
+    /// 消息内容
     pub content: String,
 }
 
+/// Chat Completion 响应结构
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ChatCompletionResponse {
+    /// 唯一标识符
     pub id: String,
+    /// 对象类型，通常为 "chat.completion"
     pub object: String,
+    /// 创建时间戳（Unix 时间）
     pub created: u64,
+    /// 使用的模型名称
     pub model: String,
+    /// 生成的选项列表
     pub choices: Vec<Choice>,
+    /// token 使用统计（可选）
     pub usage: Option<Usage>,
 }
 
+/// 生成的单个选项
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Choice {
+    /// 选项索引
     pub index: u32,
+    /// 生成的消息
     pub message: Message,
+    /// 停止原因：stop, length, null
     pub finish_reason: Option<String>,
 }
 
+/// Token 使用统计
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Usage {
+    /// 提示词 token 数
     pub prompt_tokens: u32,
+    /// 生成的 token 数
     pub completion_tokens: u32,
+    /// 总 token 数
     pub total_tokens: u32,
 }
 
+/// Text Completion 请求结构（OpenAI 格式）
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CompletionRequest {
+    /// 模型名称
     pub model: String,
+    /// 提示词（字符串或字符串数组）
     pub prompt: Value,
+    /// 生成文本的后缀
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suffix: Option<String>,
+    /// 最大生成 token 数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// 采样温度
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// 核采样参数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    /// 生成选项数量
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
+    /// 是否启用流式响应
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// 日志概率数量
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<u32>,
+    /// 是否回显提示词
     #[serde(skip_serializing_if = "Option::is_none")]
     pub echo: Option<bool>,
+    /// 停止序列
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Value>,
+    /// 存在惩罚
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
+    /// 频率惩罚
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
+    /// best_of 参数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub best_of: Option<u32>,
+    /// 用户标识
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }

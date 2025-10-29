@@ -1,3 +1,8 @@
+//! HTTP 请求路由处理模块
+//! 
+//! 负责处理入站的 TCP 连接，解析 HTTP 请求，进行速率限制检查，
+//! 并将请求路由到相应的处理函数
+
 use crate::config::load_api_config;
 use crate::error_tracking::capture_error_with_context;
 use crate::metrics::{
@@ -20,6 +25,18 @@ use super::parser::{
 use super::response::{build_error_response_with_headers, map_error_to_response, write_success};
 use super::routes::handle_route;
 
+/// 处理单个 HTTP 请求
+/// 
+/// 该函数是请求处理的入口点，执行以下步骤：
+/// 1. 生成请求 ID 并创建追踪 span
+/// 2. 读取并解析 HTTP 请求
+/// 3. 提取 API Key 并进行速率限制检查
+/// 4. 加载配置并路由请求到相应的处理函数
+/// 5. 记录指标并返回响应
+/// 
+/// # 参数
+/// - `stream`: TCP 连接流
+/// - `addr`: 客户端地址
 pub async fn handle_request(mut stream: TcpStream, addr: SocketAddr) {
     let request_id = generate_request_id();
     let request_start = Instant::now();

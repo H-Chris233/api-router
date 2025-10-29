@@ -1,16 +1,27 @@
+//! HTTP 请求解析模块
+//! 
+//! 提供 HTTP 请求的解析功能，包括请求行、头部和正文的提取
+
 use crate::errors::{RouterError, RouterResult};
 use std::collections::HashMap;
 use std::env;
 
+/// 默认 API Key 占位符（用于示例和测试）
 pub(super) const DEFAULT_API_KEY_PLACEHOLDER: &str =
     "j88R1cKdHY1EcYk9hO5vJIrV3f4rrtI5I9NuFyyTiFLDCXRhY8ooddL72AT1NqyHKMf3iGvib2W9XBYV8duUtw";
 
+/// 解析后的 HTTP 请求结构
 #[derive(Debug, Clone)]
 pub(super) struct ParsedRequest {
+    /// HTTP 方法（GET, POST 等）
     method: String,
+    /// 请求目标（路径和查询参数）
     target: String,
+    /// HTTP 版本
     version: String,
+    /// 请求头部
     headers: HashMap<String, String>,
+    /// 请求正文
     body: Vec<u8>,
 }
 

@@ -1,3 +1,11 @@
+//! Sentry 错误追踪模块
+//! 
+//! 提供与 Sentry 的集成，包括：
+//! - 错误捕获和上报
+//! - 上游故障检测和告警
+//! - 请求上下文附加
+//! - 可选启用（通过环境变量控制）
+
 use crate::errors::RouterError;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -7,23 +15,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
+/// 上游故障阈值（5 次失败后触发告警）
 const UPSTREAM_FAILURE_THRESHOLD: u64 = 5;
-const UPSTREAM_FAILURE_WINDOW_SECS: u64 = 300; // 5 minutes
+/// 上游故障时间窗口（5 分钟）
+const UPSTREAM_FAILURE_WINDOW_SECS: u64 = 300;
 
+/// 全局上游故障跟踪器
 static UPSTREAM_FAILURE_TRACKER: Lazy<DashMap<String, UpstreamFailureInfo>> =
     Lazy::new(DashMap::new);
 
+/// 上游故障信息跟踪
 #[derive(Debug)]
 struct UpstreamFailureInfo {
+    /// 失败次数计数器
     count: AtomicU64,
+    /// 首次失败时间
     first_failure: Instant,
+    /// 最后一次告警时间
     last_alerted: Option<Instant>,
 }
 
+/// Sentry 配置
 pub struct SentryConfig {
+    /// Sentry DSN（数据源名称）
     pub dsn: Option<String>,
+    /// 采样率（0.0 - 1.0）
     pub sample_rate: f32,
+    /// 环境标签（如 production, staging）
     pub environment: String,
+    /// 是否启用 Sentry
     pub enabled: bool,
 }
 

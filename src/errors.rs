@@ -1,26 +1,42 @@
+//! 错误类型定义模块
+//! 
+//! 定义 API Router 中使用的所有错误类型和结果类型
+
 use std::io;
 use thiserror::Error;
 
+/// Router 错误类型
+/// 
+/// 包含所有可能的错误情况，使用 thiserror 自动实现 Error trait
 #[derive(Error, Debug)]
 pub enum RouterError {
+    /// URL 解析或格式错误
     #[error("URL error: {0}")]
     Url(String),
+    /// I/O 操作错误
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
+    /// 配置文件读取错误
     #[error("Config read error: {0}")]
     ConfigRead(String),
+    /// 配置文件解析错误
     #[error("Config parse error: {0}")]
     ConfigParse(String),
+    /// JSON 序列化/反序列化错误
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    /// 上游 API 请求错误
     #[error("Upstream error: {0}")]
     Upstream(String),
+    /// TLS/SSL 相关错误
     #[error("TLS error: {0}")]
     Tls(String),
+    /// 客户端请求格式错误
     #[error("Bad request: {0}")]
     BadRequest(String),
 }
 
+/// Router 操作的统一结果类型
 pub type RouterResult<T> = Result<T, RouterError>;
 
 #[cfg(test)]

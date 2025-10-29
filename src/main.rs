@@ -24,6 +24,7 @@ use smol::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+/// 创建一个默认的 API 配置
 fn default_config() -> ApiConfig {
     ApiConfig {
         base_url: String::new(),
@@ -36,6 +37,13 @@ fn default_config() -> ApiConfig {
     }
 }
 
+/// 初始化追踪和日志系统
+/// 
+/// 根据 LOG_FORMAT 环境变量决定日志格式：
+/// - "json": 输出 JSON 格式日志
+/// - 其他: 输出人类可读格式
+/// 
+/// 日志级别通过 RUST_LOG 环境变量控制，默认为 info
 fn init_tracing() {
     let use_json = env::var("LOG_FORMAT")
         .unwrap_or_default()
@@ -61,32 +69,33 @@ fn init_tracing() {
 fn main() -> smol::io::Result<()> {
     init_tracing();
 
-    // Initialize Sentry error tracking
+    // 初始化 Sentry 错误追踪
     let sentry_config = SentryConfig::from_env();
     let _sentry_guard = init_sentry(&sentry_config);
 
     smol::block_on(async {
         let args: Vec<String> = env::args().collect();
 
+        // 加载配置文件，如果失败则使用默认配置
         let config = match load_api_config() {
             Ok(cfg) => cfg,
             Err(err) => {
                 match &err {
                     RouterError::ConfigParse(message) => {
                         warn!(
-                            "Failed to parse config, using default port 8000: {}",
+                            "配置解析失败，使用默认端口 8000: {}",
                             message
                         )
                     }
                     RouterError::ConfigRead(message) => {
                         error!(
-                            "Failed to load config file ({}). Using default port 8000",
+                            "配置文件加载失败 ({}). 使用默认端口 8000",
                             message
                         )
                     }
                     other => {
                         error!(
-                            "Unexpected configuration error ({}). Using default port 8000",
+                            "意外的配置错误 ({}). 使用默认端口 8000",
                             other
                         )
                     }
@@ -97,12 +106,13 @@ fn main() -> smol::io::Result<()> {
 
         let configured_port = config.port;
 
+        // 解析命令行参数中的端口号
         let base_port = if args.len() > 2 {
             match args[2].parse::<u16>() {
                 Ok(p) => p,
                 Err(e) => {
                     warn!(
-                        "Invalid port argument '{}': {}. Using configured/default port {}",
+                        "端口参数无效 '{}': {}. 使用配置/默认端口 {}",
                         args[2], e, configured_port
                     );
                     configured_port
@@ -112,6 +122,7 @@ fn main() -> smol::io::Result<()> {
             configured_port
         };
 
+        // 尝试绑定端口，如果失败则尝试下一个端口（最多尝试 10 次）
         let mut listener = None;
         let mut used_port = 0;
         for port_offset in 0..10 {
@@ -134,11 +145,12 @@ fn main() -> smol::io::Result<()> {
         if let Some(listener) = listener {
             info!("API Router 启动在 http://0.0.0.0:{}", used_port);
 
+            // 主循环：接受连接并为每个连接创建异步任务
             loop {
                 let (stream, addr) = match listener.accept().await {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Failed to accept connection: {}", e);
+                        error!("接受连接失败: {}", e);
                         continue;
                     }
                 };
